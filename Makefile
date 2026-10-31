@@ -1,7 +1,6 @@
 #-------------------------------------------------------------------------------
 .SUFFIXES:
 #-------------------------------------------------------------------------------
-
 ifeq ($(strip $(DEVKITPRO)),)
 $(error "Please set DEVKITPRO in your environment. export DEVKITPRO=<path to>/devkitpro")
 endif
@@ -9,31 +8,32 @@ endif
 TOPDIR ?= $(CURDIR)
 include $(DEVKITPRO)/libnx/switch_rules
 
-TARGET      := HOC-Undervolting-Wizard
+TARGET      := HOC-Overclocking-Wizard
 BUILD       := build
-SOURCES     := source
+SOURCES     := source source/benchmark source/benchmark/furmark
 DATA        := data
-INCLUDES    := include
+INCLUDES    := include source source/benchmark source/benchmark/furmark
 ROMFS       := romfs
 
-APP_TITLE   := HOC Undervolting Wizard
+APP_TITLE   := HOC Overclocking Wizard
 APP_AUTHOR  := Retrotendo / Community
-APP_VERSION := 0.4.0-beta.52
+APP_VERSION := 0.1.0-beta.1
 
 ARCH        := -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
 CFLAGS      := -g -Wall -O2 -ffunction-sections $(ARCH) $(DEFINES) `curl-config --cflags`
 CFLAGS      += $(INCLUDE) -D__SWITCH__ -DHOC_WIZARD_VERSION=\"$(APP_VERSION)\"
 CFLAGS      += -I$(PORTLIBS)/include/freetype2
-CXXFLAGS    := $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++17
+CXXFLAGS    := $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++17 -Wno-volatile
 ASFLAGS     := -g $(ARCH)
-LDFLAGS     = -specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
+LDFLAGS     = -specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map) -pthread
 
 PKGCONF     := $(PORTLIBS)/bin/aarch64-none-elf-pkg-config
 FREETYPE_LIBS := $(shell $(PKGCONF) --static --libs freetype2 2>/dev/null)
 ifeq ($(strip $(FREETYPE_LIBS)),)
 FREETYPE_LIBS := -lfreetype -lbz2 -lpng16 -lz -lharfbuzz -pthread -lm
 endif
-LIBS        := -ldeko3dd `curl-config --libs` $(FREETYPE_LIBS)
+LIBS        := -ldeko3dd `curl-config --libs` $(FREETYPE_LIBS) \
+               -lglad -lGLESv2 -lEGL -lglapi -ldrm_nouveau -lnx -pthread -lm
 LIBDIRS     := $(PORTLIBS) $(LIBNX)
 
 ifneq ($(BUILD),$(notdir $(CURDIR)))
@@ -50,6 +50,8 @@ export NROFLAGS += --romfsdir=$(CURDIR)/$(ROMFS)
 
 CFILES   := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
 CPPFILES := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp)))
+# beta52 main remains in the tree as a reference but is not linked into the OC app.
+CPPFILES := $(filter-out main.cpp,$(CPPFILES))
 SFILES   := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.s)))
 BINFILES := $(foreach dir,$(DATA),$(notdir $(wildcard $(dir)/*.*)))
 
