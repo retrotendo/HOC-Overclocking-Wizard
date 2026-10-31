@@ -21,6 +21,7 @@ bool setRamPreparation(bool hpMode, std::uint32_t ramMaxMHz,
 bool setRamTimings(const std::uint32_t timings[8], std::string& error);
 bool setRamMax(std::uint32_t mhz, std::string& error);
 bool setVdd2(std::uint32_t mv, std::string& error);
+bool setVdd2Uv(std::uint32_t uv, std::string& error);
 bool setVddq(std::uint32_t mv, std::string& error);
 bool setDvbShift(int shift, std::string& error);
 bool setSocVmax(int mv, std::string& error);
