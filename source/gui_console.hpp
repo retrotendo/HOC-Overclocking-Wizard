@@ -48,9 +48,9 @@ struct ModalView {
     std::string title;
     std::vector<std::string> body;
     std::string primaryAction;
-    std::string tertiaryAction;
-    std::string secondaryAction;
-    ModalTone tone = ModalTone::Amber;
+    std::string tertiaryAction;  // X button, optional
+    std::string secondaryAction; // B button, optional
+    ModalTone tone = ModalTone::Cyan;
 };
 
 struct StressView {
@@ -69,13 +69,20 @@ struct StressView {
     std::uint64_t ramBytes = 0;
 };
 
+// Real 1280x720 software-rendered UI using libnx Framebuffer + the Switch shared font.
 bool init();
 void shutdown();
 bool isInitialized();
+
+// Begin one Wizard page. printLeft() calls then add the existing guide text/actions.
 void begin(const View& view);
 void printLeft(int logicalRow, const char* text);
 void present();
+
+// Full-width modal used for startup/update/disclaimer/reboot/error states.
 void presentModal(const ModalView& view);
+
+// Dedicated graphical progress page used while built-in stress tests are running.
 void presentStress(const StressView& view);
 
 } // namespace gui
