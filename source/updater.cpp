@@ -21,14 +21,14 @@ namespace updater {
 namespace {
 
 constexpr const char* RELEASES_API =
-    "https://api.github.com/repos/retrotendo/HOC-Undervolting-Wizard/releases?per_page=100";
+    "https://api.github.com/repos/retrotendo/HOC-Overclocking-Wizard/releases?per_page=100";
 constexpr const char* UPDATE_MANIFEST =
-    "https://raw.githubusercontent.com/retrotendo/HOC-Undervolting-Wizard/main/UPDATE.txt";
-constexpr const char* NRO_ASSET = "HOC-Undervolting-Wizard.nro";
-constexpr const char* SHA_ASSET = "HOC-Undervolting-Wizard.nro.sha256";
+    "https://raw.githubusercontent.com/retrotendo/HOC-Overclocking-Wizard/main/UPDATE.txt";
+constexpr const char* NRO_ASSET = "HOC-Overclocking-Wizard.nro";
+constexpr const char* SHA_ASSET = "HOC-Overclocking-Wizard.nro.sha256";
 constexpr const char* DEFAULT_SELF =
-    "sdmc:/switch/HOC-Undervolting-Wizard/HOC-Undervolting-Wizard.nro";
-constexpr const char* USER_AGENT = "HOC-Undervolting-Wizard-Updater/1.0";
+    "sdmc:/switch/HOC-Undervolting-Wizard/HOC-Overclocking-Wizard.nro";
+constexpr const char* USER_AGENT = "HOC-Overclocking-Wizard-Updater/1.0";
 
 struct SemVersion {
     int major = 0;

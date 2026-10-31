@@ -24,8 +24,8 @@ constexpr u32 C_PANEL_2   = RGBA8_MAXALPHA(20, 29, 42);
 constexpr u32 C_BORDER    = RGBA8_MAXALPHA(43, 56, 72);
 constexpr u32 C_TEXT      = RGBA8_MAXALPHA(240, 246, 252);
 constexpr u32 C_MUTED     = RGBA8_MAXALPHA(137, 151, 169);
-constexpr u32 C_CYAN      = RGBA8_MAXALPHA(35, 211, 238);
-constexpr u32 C_CYAN_DIM  = RGBA8_MAXALPHA(15, 105, 125);
+constexpr u32 C_CYAN      = RGBA8_MAXALPHA(249, 115, 22);
+constexpr u32 C_CYAN_DIM  = RGBA8_MAXALPHA(139, 52, 13);
 constexpr u32 C_GREEN     = RGBA8_MAXALPHA(52, 211, 153);
 constexpr u32 C_BLUE      = RGBA8_MAXALPHA(59, 130, 246);
 constexpr u32 C_RED       = RGBA8_MAXALPHA(239, 68, 68);
@@ -90,6 +90,19 @@ void fillCircle(int cx, int cy, int r, u32 color) {
     for (int y = -r; y <= r; ++y) {
         const int xx = int(std::sqrt(double(std::max(0, r * r - y * y))));
         fillRect(cx - xx, cy + y, xx * 2 + 1, 1, color);
+    }
+}
+
+void drawLine(int x0, int y0, int x1, int y1, u32 color, int thickness = 2) {
+    int dx = std::abs(x1-x0), sx = x0<x1 ? 1 : -1;
+    int dy = -std::abs(y1-y0), sy = y0<y1 ? 1 : -1;
+    int err = dx + dy;
+    for (;;) {
+        fillRect(x0-thickness/2, y0-thickness/2, thickness, thickness, color);
+        if (x0==x1 && y0==y1) break;
+        const int e2 = 2*err;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
     }
 }
 
@@ -249,7 +262,7 @@ void drawHeader() {
     drawText(42, 24, 24, C_TEXT, "Horizon");
     drawText(134, 24, 24, C_CYAN, "OC");
     drawText(177, 24, 24, C_MUTED, "/");
-    drawText(198, 24, 24, C_TEXT, "Undervolting Wizard");
+    drawText(198, 24, 24, C_TEXT, "Overclocking Wizard");
 
     roundedRect(1085, 20, 150, 34, 17, C_PANEL_2);
     drawTextRight(1218, 26, 15, C_MUTED, "v" + g_view.version);
@@ -258,7 +271,7 @@ void drawHeader() {
 }
 
 void drawProgress() {
-    static const char* labels[7] = {"Baseline", "Low UV", "Low VMIN", "VDDQ", "VDD2", "High UV", "Finalize"};
+    static const char* labels[7] = {"Prepare", "RAM", "RAM Tune", "GPU", "CPU", "Combined", "Finalize"};
     const int x0 = 72, x1 = 1208, y = 106;
     fillRect(x0, y, x1 - x0, 2, C_BORDER);
     for (int i = 0; i < 7; ++i) {
@@ -389,12 +402,54 @@ void drawMainCard() {
     body.swap(compactBody);
 
     const bool completeSummary = g_view.fullWidthLayout && g_view.stageTitle == "Complete";
-    if (completeSummary) {
+    if (g_view.chartLayout && !g_view.chartPoints.empty()) {
+        const int gx = x + 76, gy = y + 142, gw = w - 152, gh = 260;
+        drawText(gx, y + 112, 18, C_CYAN, g_view.chartTitle.empty() ? "Measured tuning curve" : g_view.chartTitle);
+        fillRect(gx, gy + gh, gw, 1, C_BORDER);
+        fillRect(gx, gy, 1, gh, C_BORDER);
+
+        double minX=g_view.chartPoints.front().x, maxX=minX;
+        double minP=g_view.chartPoints.front().performance, maxP=minP;
+        double minC=1e30, maxC=-1e30;
+        for (const auto& q : g_view.chartPoints) {
+            minX=std::min(minX,q.x); maxX=std::max(maxX,q.x);
+            minP=std::min(minP,q.performance); maxP=std::max(maxP,q.performance);
+            const double c=q.power>0.01 ? q.power : q.voltage;
+            if(c>0){minC=std::min(minC,c);maxC=std::max(maxC,c);}
+        }
+        if(maxX<=minX) maxX=minX+1; if(maxP<=minP) maxP=minP+1;
+        if(maxC<=minC || minC>1e20){minC=0;maxC=1;}
+        auto px=[&](double v){return gx+int((v-minX)/(maxX-minX)*gw);};
+        auto pyP=[&](double v){return gy+gh-int((v-minP)/(maxP-minP)*gh);};
+        auto pyC=[&](double v){return gy+gh-int((v-minC)/(maxC-minC)*gh);};
+
+        for(int k=1;k<4;++k){int yy=gy+gh*k/4;fillRect(gx,yy,gw,1,mix(C_BG,C_BORDER,55));}
+        for(size_t i=1;i<g_view.chartPoints.size();++i){
+            const auto&a=g_view.chartPoints[i-1]; const auto&b=g_view.chartPoints[i];
+            drawLine(px(a.x),pyP(a.performance),px(b.x),pyP(b.performance),C_GREEN,2);
+            const double ac=a.power>0.01?a.power:a.voltage, bc=b.power>0.01?b.power:b.voltage;
+            drawLine(px(a.x),pyC(ac),px(b.x),pyC(bc),C_AMBER,2);
+        }
+        for(const auto&q:g_view.chartPoints){
+            u32 c=q.stable?C_TEXT:C_RED; int r=4;
+            if(q.stableMax){c=C_RED;r=6;}
+            if(q.sweetSpot){c=C_AMBER;r=7;}
+            if(q.recommended){c=C_GREEN;r=8;}
+            fillCircle(px(q.x),pyP(q.performance),r,c);
+        }
+        drawText(gx, gy+gh+18, 14, C_MUTED, g_view.chartXLabel);
+        drawText(gx, gy+gh+45, 14, C_GREEN, "Performance");
+        drawText(gx+125, gy+gh+45, 14, C_AMBER, g_view.chartCostLabel.empty()?"Voltage / Power":g_view.chartCostLabel);
+        drawText(gx+310, gy+gh+45, 14, C_GREEN, "Recommended");
+        drawText(gx+455, gy+gh+45, 14, C_RED, "Stable Max");
+        if(!g_view.chartSummary.empty())
+            drawWrappedText(gx, gy+gh+72, 16, C_TEXT, g_view.chartSummary, gw, 23, 3);
+    } else if (completeSummary) {
         auto drawCentered = [&](int yy, int size, u32 color, const std::string& text) {
             drawText(x + (w - textWidth(text, size)) / 2, yy, size, color, text);
         };
 
-        drawCentered(y + 124, 20, C_GREEN, "UNDERVOLTING COMPLETE");
+        drawCentered(y + 124, 20, C_GREEN, "OVERCLOCKING COMPLETE");
         drawCentered(y + 164, 16, C_CYAN, "Final values");
 
         const int tableW = 470;
@@ -403,7 +458,7 @@ void drawMainCard() {
         int rows = 0;
         std::string savedLine;
         for (const std::string& raw : body) {
-            if (raw == "UNDERVOLTING COMPLETE" || raw == "Final values:") continue;
+            if (raw == "OVERCLOCKING COMPLETE" || raw == "Final values:") continue;
             if (startsWith(raw, "Saved to ")) {
                 savedLine = raw;
                 continue;
@@ -570,7 +625,7 @@ void drawModalFrame(const ModalView& m) {
     drawText(42, 24, 24, C_TEXT, "Horizon");
     drawText(134, 24, 24, C_CYAN, "OC");
     drawText(177, 24, 24, C_MUTED, "/");
-    drawText(198, 24, 24, C_TEXT, "Undervolting Wizard");
+    drawText(198, 24, 24, C_TEXT, "Overclocking Wizard");
     roundedRect(1085, 20, 150, 34, 17, C_PANEL_2);
     drawTextRight(1218, 26, 15, C_MUTED, "v" + m.version);
     fillRect(40, 70, 1200, 1, C_BORDER);
