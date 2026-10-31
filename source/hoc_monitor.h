@@ -1,14 +1,12 @@
 /*
- * HOC Undervolting Wizard - Horizon OC monitor.
+ * HOC Overclocking Wizard - Horizon OC monitor.
  *
- * Uses the public Horizon-OC hoc:clk IPC service. The stable context fields are
- * used for clocks/voltages; current API-v2 context/config fields are used for
- * DRAM identification and persistent-setting verification. Temporary CPU/GPU/
- * MEM overrides can also be written through HOC's public SetOverride IPC.
+ * Uses the public Horizon-OC hoc:clk IPC service. Stable context fields are
+ * used for clocks/voltages/power; API-v2 context/config fields are used for
+ * DRAM identification and persistent-setting verification.
  *
  * SPDX-License-Identifier: GPL-2.0-only
  */
-
 #pragma once
 
 #include <switch.h>
@@ -21,8 +19,15 @@ typedef struct {
     u32 targetHz[3];
     u32 realHz[3];
     u32 overrideHz[3];
-    /* Current CPU rail voltage reported by Horizon OC, in microvolts. */
+    /* Stable voltage order: SOC, VDD2, CPU, GPU, VDDQ, display, battery. */
+    u32 socVoltageUv;
+    u32 vdd2VoltageUv;
     u32 cpuVoltageUv;
+    u32 gpuVoltageUv;
+    u32 vddqVoltageUv;
+    /* HOC battery-side MAX17050 power sensors, in mW. */
+    s32 powerNowMw;
+    s32 powerAvgMw;
 } HocMonClocks;
 
 typedef struct {
@@ -58,6 +63,26 @@ typedef struct {
     u32 cpuBoostKHz;
 } HocMonConfig;
 
+/* Persistent OC preparation fields used before the RAM search. */
+typedef struct {
+    bool uncappedClocks;
+    bool hpMode;
+    u32 ramMaxKHz;
+    u32 vdd2Uv;
+    u32 vddqUv;
+    u32 dvbShift;
+    u32 socVmaxUv;
+    u32 timings[8];
+    int lowUv;
+    int highUv;
+    int tableConf;
+    int lowVminMv;
+    int highVminMv;
+    u32 cpuMaxVoltMv;
+    u32 cpuMaxKHz;
+    u32 cpuBoostKHz;
+} HocMonOcPreparation;
+
 #define HOCMON_CONFIG_DEBUG_VALUE_COUNT 256
 typedef struct {
     u32 apiVersion;
@@ -71,40 +96,25 @@ enum {
     HocMonModule_MEM = 2,
 };
 
-/* Read CPU/GPU/MEM target, real and temporary override clocks + CPU voltage. */
 Result hocmonGetClocks(HocMonClocks* out);
-
-/* Set one Horizon OC Temporary Override. hz=0 clears that module override. */
 Result hocmonSetOverride(u32 module, u32 hz);
-
-/* Read DRAM identity from Horizon OC API-v2 current context. */
 Result hocmonGetHardware(HocMonHardware* out);
-
-/* Raw context diagnostics for hardware-layout troubleshooting. */
 Result hocmonGetHardwareDebug(HocMonHardwareDebug* out);
-
-/* Read the persistent Horizon OC/KIP values used by the Battery Wizard. */
 Result hocmonGetConfig(HocMonConfig* out);
-
-/*
- * Horizon OC 2.5.1 only: apply the Wizard Preparation values through HOC's
- * own SetConfigValues IPC and persist them with SetKipData (Save KIP).
- * Returns a non-zero Result when the running HOC layout/version is unsupported.
- */
 Result hocmonApplyPreparation251(const HocMonConfig* desired);
+Result hocmonApplyCpuLow251(int lowUv, int lowVminMv, u32 fieldsMask);
+Result hocmonGetConfig251(HocMonConfig* out);
+Result hocmonGetConfigDebug(HocMonConfigDebug* out);
 
 /*
- * Horizon OC 2.5.1 only: update CPU Low UV and/or Low VMIN through the
- * same SetConfigValues + SetKipData path used by Horizon OC itself.
- * fieldsMask bit0 = Low UV, bit1 = Low VMIN.
+ * Apply the OC-Wizard preparation through HOC's own config IPC + Save KIP.
+ * Supports the 2.5.1 layout and the current 2.6+/main layout. Unknown layouts
+ * are rejected instead of writing guessed indexes.
  */
-Result hocmonApplyCpuLow251(int lowUv, int lowVminMv, u32 fieldsMask);
+Result hocmonApplyOcPreparation(const HocMonOcPreparation* desired);
 
-/* Read the running Horizon OC 2.5.1 config through hoc:clk/GetConfigValues. */
-Result hocmonGetConfig251(HocMonConfig* out);
-
-/* Raw hoc:clk config-list diagnostics. Read-only; used by debug builds. */
-Result hocmonGetConfigDebug(HocMonConfigDebug* out);
+/* Verify the OC preparation fields against the current persistent config. */
+Result hocmonVerifyOcPreparation(const HocMonOcPreparation* desired, u32* mismatchMask);
 
 #ifdef __cplusplus
 }
