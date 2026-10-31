@@ -20,6 +20,17 @@ struct PreparationRow {
     bool mismatch = false;
 };
 
+struct ChartPoint {
+    double x = 0.0;
+    double performance = 0.0;
+    double voltage = 0.0;
+    double power = 0.0;
+    bool stable = true;
+    bool sweetSpot = false;
+    bool stableMax = false;
+    bool recommended = false;
+};
+
 struct View {
     std::string version;
     std::string stageTitle;
@@ -38,6 +49,14 @@ struct View {
     bool fullWidthLayout = false;
     bool havePreparationActiveValues = false;
     std::vector<PreparationRow> preparationRows;
+
+    bool chartLayout = false;
+    std::string chartTitle;
+    std::string chartXLabel;
+    std::string chartPerformanceLabel = "Performance";
+    std::string chartCostLabel = "Voltage";
+    std::vector<ChartPoint> chartPoints;
+    std::string chartSummary;
 };
 
 enum class ModalTone { Cyan, Green, Amber, Red };
@@ -48,8 +67,8 @@ struct ModalView {
     std::string title;
     std::vector<std::string> body;
     std::string primaryAction;
-    std::string tertiaryAction;  // X button, optional
-    std::string secondaryAction; // B button, optional
+    std::string tertiaryAction;
+    std::string secondaryAction;
     ModalTone tone = ModalTone::Cyan;
 };
 
@@ -69,20 +88,13 @@ struct StressView {
     std::uint64_t ramBytes = 0;
 };
 
-// Real 1280x720 software-rendered UI using libnx Framebuffer + the Switch shared font.
 bool init();
 void shutdown();
 bool isInitialized();
-
-// Begin one Wizard page. printLeft() calls then add the existing guide text/actions.
 void begin(const View& view);
 void printLeft(int logicalRow, const char* text);
 void present();
-
-// Full-width modal used for startup/update/disclaimer/reboot/error states.
 void presentModal(const ModalView& view);
-
-// Dedicated graphical progress page used while built-in stress tests are running.
 void presentStress(const StressView& view);
 
 } // namespace gui
