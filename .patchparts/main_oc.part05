@@ -1,0 +1,107 @@
+=copyFile(HOC_KIP,(std::string(PERF_OC_DIR)+"/hoc.kip").c_str());std::ofstream f(RESULTS_FILE,std::ios::trunc);f<<"HOC Overclocking Wizard "<<HOC_WIZARD_VERSION<<"\n";f<<"RAM="<<g.ramRecommendedMHz<<" MHz\nGPU="<<g.gpuRecommendedMHz<<" MHz\nCPU="<<g.cpuRecommendedMHz<<" MHz\nHighUV="<<g.highUvGood<<"\nTBreak="<<(g.finalTbreak==2?1581:1683)<<" MHz\nVDD2="<<fmtMvUv(g.vdd2GoodUv)<<"\nVDDQ="<<g.vddqGoodMv<<" mV\nSoC="<<g.socGoodMv<<" mV\n";f.flush();fsdevCommitDevice("sdmc");if(!a||!b){modalError("Tuning finished, but Performance Modes OCMode files could not both be saved.");return;}g.stage=Stage::Complete;saveState();}
++void runLowUv(){
++    std::string e;if(!g.lowUvApplied){if(g.lowUvCandidate>8){beginLowVmin();return;}if(!occonfig::setCpuTuning(g.lowUvCandidate,g.highUvGood,3,620,870,CPU_VMAX_SAFE,g.cpuStableMaxMHz,e)){modalError(e);return;}g.lowUvApplied=1;saveState();requestReboot(Stage::CpuLowUv);return;}
++    int cost=0;if(testLowPair(g.lowUvCandidate,620,cost)){g.lowUvGood=g.lowUvCandidate;g.lowLastCostMv=cost;++g.lowUvCandidate;g.lowUvApplied=0;saveState();}
++    else{if(!occonfig::setCpuTuning(g.lowUvGood,g.highUvGood,3,620,870,CPU_VMAX_SAFE,g.cpuStableMaxMHz,e)){modalError(e);return;}g.lowUvApplied=0;beginLowVmin();requestReboot(Stage::CpuLowVmin);}
++}
+ 
+-void resetAll(){clearOverrides();unlink(STATE_FILE);unlink(POINTS_FILE);unlink(RESULTS_FILE);unlink(DISCLAIMER_FILE);g=State{};ramPoints.clear();gpuPoints.clear();cpuPoints.clear();detectHardware();saveState();}
++void applyBestLowAndContinue(){
++    std::string e;g.lowUvGood=g.lowBestUv;if(!occonfig::setCpuTuning(g.lowBestUv,g.highUvGood,3,g.lowBestVmin,870,CPU_VMAX_SAFE,g.cpuStableMaxMHz,e)){modalError(e);return;}g.lowVminApplied=0;saveState();requestReboot(Stage::CpuTbreak2Set);
++}
++
++void runLowVmin(){
++    std::string e;if(g.lowVminCandidate<CPU_LOW_VMIN_FLOOR){applyBestLowAndContinue();return;}
++    if(!g.lowVminApplied){if(!occonfig::setCpuTuning(g.lowUvGood,g.highUvGood,3,g.lowVminCandidate,870,CPU_VMAX_SAFE,g.cpuStableMaxMHz,e)){modalError(e);return;}g.lowVminApplied=1;saveState();requestReboot(Stage::CpuLowVmin);return;}
++    int cost=0;if(testLowPair(g.lowUvGood,g.lowVminCandidate,cost)){if(cost<g.lowBestCostMv){g.lowBestCostMv=cost;g.lowBestUv=g.lowUvGood;g.lowBestVmin=g.lowVminCandidate;}g.lowVminCandidate-=10;g.lowVminApplied=0;saveState();return;}
++    if(g.lowUvGood>0){--g.lowUvGood;g.lowVminApplied=0;saveState();return;}
++    applyBestLowAndContinue();
++}
++
++bool tbreakBoundaryCost(int&out){std::string e;double sum=0;for(int f:{1581,1683}){if(!setOverrides(u32(f)*1000000U,GPU_BASE_HZ,u32(g.ramRecommendedMHz)*1000000U,e))return false;if(!runStress(stress::Kind::Combined,45,"CPU TBreak Boundary","CPU "+std::to_string(f)+" MHz"))return false;HocMonClocks c{};if(R_FAILED(hocmonGetTelemetry(&c)))return false;sum+=c.cpuVoltageUv/1000.0;}out=int(std::round(sum/2.0));return true;}
+ 
+-void recoverInterrupted(){g.testRunning=0;g.testStage=-1;std::string e;switch(g.stage){case Stage::RamVdd2:if(g.vdd2Applied){occonfig::setVdd2Uv(g.vdd2GoodUv,e);g.vdd2Applied=0;g.stage=Stage::RamVddq;requestReboot(g.stage);return;}break;case Stage::RamVddq:if(g.vddqApplied){occonfig::setVddq(g.vddqGoodMv,e);g.vddqApplied=0;g.stage=Stage::RamSoc;requestReboot(g.stage);return;}break;case Stage::RamSoc:if(g.socApplied){occonfig::setSocPoint(g.socTableMHz,g.socGoodMv,e);g.socApplied=0;g.stage=Stage::RamFinalGraph;requestReboot(g.stage);return;}break;case Stage::GpuTune:if(g.gpuApplied){int f=GPU_FREQS[g.gpuIndex];occonfig::setGpuPoint(f,g.gpuGoodMv,e);g.gpuApplied=0;finishGpuPoint();requestReboot(g.stage);return;}break;case Stage::CpuHighUv:if(g.highUvApplied){occonfig::setCpuTuning(0,g.highUvGood,3,620,750,1200,2397,e);g.highUvApplied=0;g.stage=Stage::CpuSweep;requestReboot(g.stage);return;}break;default:break;}saveState();}
++void beginHighVmin(){g.highVminGood=870;g.highVminCandidate=850;g.highVminApplied=0;g.stage=Stage::CpuHighVmin;saveState();}
+ 
++void runHighVmin(){
++    std::string e;if(g.highVminCandidate<CPU_HIGH_VMIN_FLOOR){g.stage=Stage::CpuVmax;saveState();return;}
++    if(!g.highVminApplied){if(!occonfig::setCpuTuning(g.lowBestUv,g.highUvGood,g.finalTbreak,g.lowBestVmin,g.highVminCandidate,CPU_VMAX_SAFE,g.cpuStableMaxMHz,e)){modalError(e);return;}g.highVminApplied=1;saveState();requestReboot(Stage::CpuHighVmin);return;}
++    int f=g.finalTbreak==2?1581:1683;if(!setOverrides(u32(f)*1000000U,GPU_BASE_HZ,u32(g.ramRecommendedMHz)*1000000U,e)){modalError(e);return;}
++    if(runStress(stress::Kind::Combined,60,"CPU High VMIN Stability","CPU "+std::to_string(f)+" MHz + RAM "+std::to_string(g.ramRecommendedMHz))){g.highVminGood=g.highVminCandidate;g.highVminCandidate-=10;g.highVminApplied=0;saveState();}
++    else{if(!occonfig::setCpuTuning(g.lowBestUv,g.highUvGood,g.finalTbreak,g.lowBestVmin,g.highVminGood,CPU_VMAX_SAFE,g.cpuStableMaxMHz,e)){modalError(e);return;}g.highVminApplied=0;saveState();requestReboot(Stage::CpuVmax);}
+ }
+ 
++void finishVmax(){
++    std::string e;if(!occonfig::setCpuTuning(g.lowBestUv,g.highUvGood,g.finalTbreak,g.lowBestVmin,g.highVminGood,g.vmaxGood,g.cpuStableMaxMHz,e)){modalError(e);return;}g.vmaxApplied=0;g.cpuFinalIndex=0;saveState();requestReboot(Stage::CpuFinalSweep);
++}
++
++void runVmax(){
++    std::string e;if(g.vmaxCandidate==0){if(!setOverrides(u32(g.cpuStableMaxMHz)*1000000U,GPU_BASE_HZ,u32(g.ramRecommendedMHz)*1000000U,e)){modalError(e);return;}if(!runStress(stress::Kind::Combined,45,"CPU VMAX Baseline","CPU "+std::to_string(g.cpuStableMaxMHz)+" MHz")){modalError("Top CPU point is no longer stable before VMAX tuning.");return;}HocMonClocks c{};hocmonGetTelemetry(&c);int actual=int(std::round(c.cpuVoltageUv/10000.0))*10;g.vmaxGood=CPU_VMAX_SAFE;g.vmaxCandidate=std::min(CPU_VMAX_SAFE-10,actual+20);if(g.vmaxCandidate>=CPU_VMAX_SAFE)g.vmaxCandidate=CPU_VMAX_SAFE-10;saveState();return;}
++    if(!g.vmaxApplied){if(g.vmaxCandidate<800){finishVmax();return;}if(!occonfig::setCpuTuning(g.lowBestUv,g.highUvGood,g.finalTbreak,g.lowBestVmin,g.highVminGood,g.vmaxCandidate,g.cpuStableMaxMHz,e)){modalError(e);return;}g.vmaxApplied=1;saveState();requestReboot(Stage::CpuVmax);return;}
++    bool clocks=setOverrides(u32(g.cpuStableMaxMHz)*1000000U,GPU_BASE_HZ,u32(g.ramRecommendedMHz)*1000000U,e);bool pass=clocks&&runStress(stress::Kind::Combined,60,"CPU VMAX Stability","CPU "+std::to_string(g.cpuStableMaxMHz)+" MHz @ cap "+std::to_string(g.vmaxCandidate)+" mV");HocMonClocks c{};if(clocks)hocmonGetTelemetry(&c);bool realOk=clocks&&clockMatch(c.realHz[0],u32(g.cpuStableMaxMHz)*1000000U);
++    if(pass&&realOk){g.vmaxGood=g.vmaxCandidate;g.vmaxCandidate-=10;g.vmaxApplied=0;saveState();}
++    else finishVmax();
++}
++
++void runCpuFinal(){
++    while(g.cpuFinalIndex<int(sizeof(CPU_FREQS)/sizeof(CPU_FREQS[0]))&&CPU_FREQS[g.cpuFinalIndex]>g.cpuStableMaxMHz)++g.cpuFinalIndex;
++    if(g.cpuFinalIndex>=int(sizeof(CPU_FREQS)/sizeof(CPU_FREQS[0]))){analyzeCpu();g.stage=Stage::CpuGraph;saveState();return;}
++    int f=CPU_FREQS[g.cpuFinalIndex];std::string e;if(!guardCpuConfig(g.lowBestUv,g.highUvGood,g.finalTbreak,g.lowBestVmin,g.highVminGood,g.vmaxGood,g.cpuStableMaxMHz,"final CPU measurement"))return;if(!setOverrides(u32(f)*1000000U,GPU_BASE_HZ,u32(g.ramRecommendedMHz)*1000000U,e)){modalError(e);return;}if(!runStress(stress::Kind::Combined,60,"CPU Final Stability","CPU "+std::to_string(f)+" MHz")){modalError("A point in the final CPU curve failed. Use one step less aggressive High UV and revalidate before continuing.");return;}auto b=ocbench::runCpu(7);if(!b.ok){modalError(b.error);return;}oc::SweepPoint p;p.domain=oc::Domain::Cpu;p.requestedMHz=f;p.realMHz=b.telemetry.realCpuMHz;p.railMv=std::uint32_t(std::round(b.telemetry.cpuMv));p.performance=b.fps;p.batteryPowerW=b.telemetry.batteryPowerW;p.powerReliable=false;p.stable=true;p.context="Final CPU curve + final RAM";recordPoint(cpuPoints,p);++g.cpuFinalIndex;saveState();
++}
++
++void runCpuRam(){
++    std::string e;if(!setOverrides(u32(g.cpuRecommendedMHz)*1000000U,GPU_BASE_HZ,u32(g.ramRecommendedMHz)*1000000U,e)){modalError(e);return;}bool pass=runStress(stress::Kind::Combined,300,"CPU + RAM Final Validation","CPU "+std::to_string(g.cpuRecommendedMHz)+" | RAM "+std::to_string(g.ramRecommendedMHz));if(pass){g.cpuRamTrial=0;g.stage=Stage::Finalize;saveState();return;}
++    if(g.cpuRamTrial==0){g.cpuRamOriginalRam=g.ramRecommendedMHz;g.cpuRamOriginalCpu=g.cpuRecommendedMHz;g.cpuRamOriginalHighUv=g.highUvGood;g.cpuRamOriginalSoc=g.socGoodMv;g.cpuRamOriginalVdd2Uv=g.vdd2GoodUv;if(g.highUvGood>0&&occonfig::setCpuTuning(g.lowBestUv,g.highUvGood-1,g.finalTbreak,g.lowBestVmin,g.highVminGood,g.vmaxGood,g.cpuStableMaxMHz,e)){g.highUvGood--;g.cpuRamTrial=1;saveState();requestReboot(Stage::CpuRamCombined);return;}}
++    if(g.cpuRamTrial==1){g.highUvGood=g.cpuRamOriginalHighUv;if(!occonfig::setCpuTuning(g.lowBestUv,g.highUvGood,g.finalTbreak,g.lowBestVmin,g.highVminGood,g.vmaxGood,g.cpuStableMaxMHz,e)){modalError(e);return;}int up=nextHigherSocMv(g.cpuRamOriginalSoc);if(up>0&&occonfig::setSocPoint(g.socTableMHz,up,e)){g.socGoodMv=up;g.cpuRamTrial=2;saveState();requestReboot(Stage::CpuRamCombined);return;}}
++    if(g.cpuRamTrial==2){if(!occonfig::setSocPoint(g.socTableMHz,g.cpuRamOriginalSoc,e)){modalError(e);return;}g.socGoodMv=g.cpuRamOriginalSoc;if(!occonfig::setVdd2Uv(g.cpuRamOriginalVdd2Uv+12500,e)){modalError(e);return;}g.vdd2GoodUv=g.cpuRamOriginalVdd2Uv+12500;g.cpuRamTrial=3;saveState();requestReboot(Stage::CpuRamCombined);return;}
++    if(g.cpuRamTrial==3){if(!occonfig::setVdd2Uv(g.cpuRamOriginalVdd2Uv,e)){modalError(e);return;}g.vdd2GoodUv=g.cpuRamOriginalVdd2Uv;int lower=previousPointMHz(ramPoints,g.cpuRamOriginalRam);if(lower>0){g.ramRecommendedMHz=lower;g.cpuRamTrial=4;saveState();return;}}
++    if(g.cpuRamTrial==4){g.ramRecommendedMHz=g.cpuRamOriginalRam;int lower=previousPointMHz(cpuPoints,g.cpuRamOriginalCpu);if(lower>0){g.cpuRecommendedMHz=lower;g.cpuRamTrial=5;saveState();return;}}
++    modalError("CPU + RAM remains unstable after isolated CPU-UV, SoC, VDD2, RAM-clock and CPU-clock checks. Review the curves before saving a profile.");
++}
++
++void saveFinal(){
++    ensureDir(PERF_OC_DIR);bool a=copyFile(HOC_CONFIG,(std::string(PERF_OC_DIR)+"/config.ini").c_str());bool b=copyFile(HOC_KIP,(std::string(PERF_OC_DIR)+"/hoc.kip").c_str());std::ofstream f(RESULTS_FILE,std::ios::trunc);
++    f<<"HOC Overclocking Wizard "<<HOC_WIZARD_VERSION<<"\n";f<<"RAM="<<g.ramRecommendedMHz<<" MHz\nGPU="<<g.gpuRecommendedMHz<<" MHz\nCPU="<<g.cpuRecommendedMHz<<" MHz\nLowUV="<<g.lowBestUv<<"\nLowVMIN="<<g.lowBestVmin<<" mV\nHighUV="<<g.highUvGood<<"\nTBreak="<<(g.finalTbreak==2?1581:1683)<<" MHz\nHighVMIN="<<g.highVminGood<<" mV\nVMAX="<<g.vmaxGood<<" mV\nVDD2="<<fmtMvUv(g.vdd2GoodUv)<<"\nVDDQ="<<g.vddqGoodMv<<" mV\nSoC="<<g.socGoodMv<<" mV\n";f.flush();fsdevCommitDevice("sdmc");if(!a||!b){modalError("Tuning finished, but Performance Modes OCMode files could not both be saved.");return;}g.stage=Stage::Complete;saveState();
++}
++
++void resetAll(){clearOverrides();unlink(STATE_FILE);unlink(POINTS_FILE);unlink(RESULTS_FILE);unlink(DISCLAIMER_FILE);g=State{};ramPoints.clear();gpuPoints.clear();cpuPoints.clear();detectHardware();saveState();}
++
++void recoverInterrupted(){
++    g.testRunning=0;g.testStage=-1;std::string e;
++    switch(g.stage){
++        case Stage::RamDvb:if(g.dvbApplied){occonfig::setDvbShift(g.dvbGood,e);g.dvbApplied=0;requestReboot(Stage::RamVdd2);return;}break;
++        case Stage::RamVdd2:if(g.vdd2Applied){occonfig::setVdd2Uv(g.vdd2GoodUv,e);g.vdd2Applied=0;requestReboot(Stage::RamVddq);return;}break;
++        case Stage::RamVddq:if(g.vddqApplied){occonfig::setVddq(g.vddqGoodMv,e);g.vddqApplied=0;requestReboot(Stage::RamSoc);return;}break;
++        case Stage::RamSoc:if(g.socApplied){occonfig::setSocPoint(g.socTableMHz,g.socGoodMv,e);g.socApplied=0;requestReboot(Stage::RamFinalGraph);return;}break;
++        case Stage::GpuTune:if(g.gpuApplied==1){int f=GPU_FREQS[g.gpuIndex];occonfig::setGpuPoint(f,g.gpuGoodMv,e);g.gpuApplied=2;saveState();requestReboot(Stage::GpuTune);return;}break;
++        case Stage::CpuHighUv:if(g.highUvApplied){occonfig::setCpuTuning(0,g.highUvGood,3,620,870,CPU_VMAX_SAFE,g.cpuStableMaxMHz,e);g.highUvApplied=0;requestReboot(Stage::CpuLowUv);return;}break;
++        case Stage::CpuLowUv:if(g.lowUvApplied){occonfig::setCpuTuning(g.lowUvGood,g.highUvGood,3,620,870,CPU_VMAX_SAFE,g.cpuStableMaxMHz,e);g.lowUvApplied=0;requestReboot(Stage::CpuLowVmin);return;}break;
++        case Stage::CpuLowVmin:if(g.lowVminApplied){applyBestLowAndContinue();return;}break;
++        case Stage::CpuHighVmin:if(g.highVminApplied){occonfig::setCpuTuning(g.lowBestUv,g.highUvGood,g.finalTbreak,g.lowBestVmin,g.highVminGood,CPU_VMAX_SAFE,g.cpuStableMaxMHz,e);g.highVminApplied=0;requestReboot(Stage::CpuVmax);return;}break;
++        case Stage::CpuVmax:if(g.vmaxApplied){finishVmax();return;}break;
++        default:break;
++    }
++    saveState();
++}
++
++} // namespace
++
+ int main(int argc,char**argv){
+     socketInitializeDefault(); nxlinkStdio();
+     ensureDir(APP_DIR); loadState(); loadPoints();
+@@ -365,7 +620,7 @@
+     if(updater::startupCheckAndPrompt(pad,argc,argv)){gui::shutdown();socketExit();return 0;}
+ 
+     if(!fileExists(DISCLAIMER_FILE)){
+-        gui::ModalView m;m.version=HOC_WIZARD_VERSION;m.eyebrow="SAFETY NOTICE";m.title="Overclocking can cause crashes or data corruption";m.body={"This Wizard changes Horizon OC clocks, voltages and timings.","Instability can corrupt data and unsafe settings can damage hardware.","Use entirely at your own risk. Keep backups of important data."};m.primaryAction="A  I understand / continue";m.secondaryAction="B  Exit";m.tone=gui::ModalTone::Red;gui::presentModal(m);
++        gui::ModalView m;m.version=HOC_WIZARD_VERSION;m.eyebrow="SAFETY NOTICE";m.title="Overclocking can cause crashes or data corruption";m.body={"This Wizard changes Horizon OC clocks, voltages and timings.","RAM instability can corrupt SD/NAND data. Keep backups and a no-OC recovery boot.","Use entirely at your own risk."};m.primaryAction="A  I understand / continue";m.secondaryAction="B  Exit";m.tone=gui::ModalTone::Red;gui::presentModal(m);
+         bool accepted=false;while(appletMainLoop()){padUpdate(&pad);u64 k=padGetButtonsDown(&pad);if(k&HidNpadButton_A){std::ofstream(DISCLAIMER_FILE)<<"accepted\n";fsdevCommitDevice("sdmc");accepted=true;break;}if(k&HidNpadButton_B)break;svcSleepThread(20'000'000);}if(!accepted){gui::shutdown();socketExit();return 0;}
+     }
+ 
+@@ -382,26 +637,36 @@
+         if(k&HidNpadButton_Minus){resetAll();redraw=true;continue;}
+         if(k&HidNpadButton_B){saveState();break;}
+ 
+-        if(g.stage==Stage::Hardware&&(k&HidNpadButton_A)){detectHardware();if(g_errorModal){redraw=true;continue;}if(!profile()){modalError("This DRAM ID has no safe automatic profile. Beta 1 will not write guessed timings.");}else{g.stage=Stage::BenchmarkPrep;saveState();}redraw=true;continue;}
+-        if(g.stage==Stage::BenchmarkPrep&&(k&HidNpadButton_A)){u32 pct=0;PsmChargerType ch=PsmChargerType_Unconnected;batteryReady(pct,ch);if(ch==PsmChargerType_Unconnected){modalError("Connect the charger before starting the benchmark series.");}else if(pct<95){modalError("Charge the console to at least 95% before starting the benchmark series.");}else{g.benchmarkReady=1;g.stage=Stage::RamPreparation;saveState();}redraw=true;continue;}
+-        if(g.stage==Stage::RamPreparation){if(k&HidNpadButton_Y){prepareRamAuto();redraw=true;continue;}if(k&HidNpadButton_A){const auto*p=profile();HocMonOcPreparation d{};d.uncappedClocks=true;d.hpMode=true;d.ramMaxKHz=std::min<std::uint32_t>(3400,p->maxMHz+100)*1000U;d.vdd2Uv=p->vdd2Mv*1000U;d.vddqUv=p->vddqMv*1000U;d.dvbShift=2;d.socVmaxUv=1200;for(int i=0;i<8;++i)d.timings[i]=p->common.t[i];u32 mm=0;Result rc=hocmonVerifyOcPreparation(&d,&mm);if(R_SUCCEEDED(rc)&&mm==0){g.vdd2GoodUv=int(d.vdd2Uv);g.vdd2CandidateUv=g.vdd2GoodUv-12500;g.vddqGoodMv=int(p->vddqMv);g.
