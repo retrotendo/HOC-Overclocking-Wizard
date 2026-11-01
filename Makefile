@@ -51,7 +51,10 @@ export NROFLAGS += --romfsdir=$(CURDIR)/$(ROMFS)
 CFILES   := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
 CPPFILES := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp)))
 # beta52 main remains in the tree as a reference but is not linked into the OC app.
-CPPFILES := $(filter-out main.cpp,$(CPPFILES))
+# The copied experimental gpu_bench.cpp used a second embedded shader pipeline;
+# beta1 instead measures GPU FPS with Benchmark Toolbox Furmark and uses the
+# existing deko3d verifier for stability.
+CPPFILES := $(filter-out main.cpp gpu_bench.cpp,$(CPPFILES))
 SFILES   := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.s)))
 BINFILES := $(foreach dir,$(DATA),$(notdir $(wildcard $(dir)/*.*)))
 
