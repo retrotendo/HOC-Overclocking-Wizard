@@ -65,7 +65,7 @@ jobs:
         run: python3 .github/scripts/build_beta20_fix.py
       - name: Apply beta21 RAM sweep result and UX cleanup
         run: python3 .github/scripts/build_beta21_patch.py
-      - name: Apply beta21 task-card cleanup fix
+      - name: Apply beta21 task-card and temporary developer-test fixes
         run: python3 .github/scripts/build_beta21_fix.py
 
       - name: Build NRO
