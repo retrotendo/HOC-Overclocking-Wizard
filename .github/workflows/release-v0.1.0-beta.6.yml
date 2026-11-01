@@ -1,0 +1,89 @@
+name: Publish v0.1.0-beta.6
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v0.1.0-beta.6.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply beta6 automatic RAM sweep
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p=Path('Makefile'); s=p.read_text()
+          s=s.replace('APP_VERSION := 0.1.0-beta.3','APP_VERSION := 0.1.0-beta.6')
+          p.write_text(s)
+
+          p=Path('source/main_oc.cpp'); s=p.read_text()
+
+          # Keep the agreed RAM preparation and tuning fundamentals unchanged:
+          # Common timings, HP OFF, profile/reference VDD2/VDDQ, DVB5, 3400 cap.
+          # Only change the capability sweep interaction: one confirmation starts
+          # an automatic candidate-by-candidate sweep until fail/cap/end.
+          old='''        case Stage::RamSweep:{int freq=(g.ramSearchIndex>=0)?int(oc::RAM_STEPS_MHZ[g.ramSearchIndex]):0;v.stageTitle="RAM Clock Search";v.instructionTitle="Test the next RAM clock";v.instructionLine1="Real-clock / PLL check, stability test and Memory Benchmark.";v.instructionLine2="A  Start test";gui::begin(v);print(1,"The table range is guidance, not a hard device limit; search may continue to the HOC safe ceiling.");print(3,"Candidate: "+std::to_string(freq)+" MHz");print(4,"Last stable: "+std::to_string(g.ramStableMaxMHz)+" MHz");print(8,"A : Run candidate test");print(9,"X : Known unstable / stop upward search");print(10,"B : Exit");gui::present();break;}'''
+          new='''        case Stage::RamSweep:{int freq=(g.ramSearchIndex>=0)?int(oc::RAM_STEPS_MHZ[g.ramSearchIndex]):0;v.stageTitle="RAM Clock Search";v.instructionTitle="Automatic RAM capability sweep";v.instructionLine1="The Wizard increases RAM automatically until the first fail, clock cap, crash or freeze.";v.instructionLine2="A  Start automatic sweep";gui::begin(v);print(1,"WARNING: A crash or freeze is expected and can be part of finding the RAM limit.");print(2,"If that happens, reboot normally into CFW and reopen the Wizard.");print(3,"Candidates use temporary HOC clock overrides; the tested RAM clock is not saved as a boot clock.");print(5,"First candidate: "+std::to_string(freq)+" MHz");print(6,"Last stable: "+std::to_string(g.ramStableMaxMHz)+" MHz");print(9,"A : Start automatic RAM sweep");print(10,"X : Stop / use last stable result");print(11,"B : Exit");gui::present();break;}'''
+          if old not in s: raise SystemExit('RamSweep UI block not found')
+          s=s.replace(old,new,1)
+
+          marker='''void validateHp(){'''
+          helper='''void runRamSweepAutomatic(){\n    while(g.stage==Stage::RamSweep && g.ramSearchIndex>=0 && g.ramSearchIndex<=g.ramSearchEndIndex){\n        const int before=g.ramSearchIndex;\n        runRamCandidate();\n        if(g_errorModal || g.stage!=Stage::RamSweep) return;\n        if(g.ramSearchIndex==before) return;\n        svcSleepThread(250'000'000);\n    }\n    if(g.stage==Stage::RamSweep) finishRamSweep();\n}\n\n'''
+          if marker not in s: raise SystemExit('validateHp marker not found')
+          s=s.replace(marker,helper+marker,1)
+
+          oldhandler='''        if(g.stage==Stage::RamSweep){if(k&HidNpadButton_A){runRamCandidate();redraw=true;continue;}if(k&HidNpadButton_X){finishRamSweep();redraw=true;continue;}}'''
+          newhandler='''        if(g.stage==Stage::RamSweep){if(k&HidNpadButton_A){runRamSweepAutomatic();redraw=true;continue;}if(k&HidNpadButton_X){finishRamSweep();redraw=true;continue;}}'''
+          if oldhandler not in s: raise SystemExit('RamSweep input handler not found')
+          s=s.replace(oldhandler,newhandler,1)
+
+          # Interrupted RAM stress means the temporary candidate did not finish.
+          # On relaunch, retain the previous completed candidate as the result and
+          # continue to the result screen; no persistent candidate clock needs restoring.
+          oldrec='''    switch(g.stage){\n        case Stage::RamDvb:'''
+          newrec='''    switch(g.stage){\n        case Stage::RamSweep:clearOverrides();g.testRunning=0;g.testStage=-1;finishRamSweep();return;\n        case Stage::RamDvb:'''
+          if oldrec not in s: raise SystemExit('recovery switch marker not found')
+          s=s.replace(oldrec,newrec,1)
+
+          p.write_text(s)
+          PY
+
+      - name: Build NRO
+        run: make -j2
+
+      - name: Create checksum
+        run: sha256sum HOC-Overclocking-Wizard.nro > HOC-Overclocking-Wizard.nro.sha256
+
+      - name: Publish GitHub pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.0-beta.6
+          target_commitish: main
+          name: HOC Overclocking Wizard v0.1.0-beta.6
+          body: |
+            Beta 6 automatic RAM capability sweep.
+            - One confirmation starts the complete RAM clock sweep.
+            - Each passing candidate automatically advances to the next RAM clock.
+            - First fail / clock cap ends the sweep normally.
+            - A clear warning explains that crash/freeze can occur during limit discovery.
+            - After a crash/freeze, reboot normally into CFW and reopen the Wizard.
+            - Interrupted RAM sweep recovery keeps the last completed stable candidate.
+            - Candidate RAM clocks remain temporary HOC overrides and are not saved as boot clocks.
+            - RAM preparation/tuning fundamentals are otherwise unchanged.
+          prerelease: true
+          make_latest: false
+          files: |
+            HOC-Overclocking-Wizard.nro
+            HOC-Overclocking-Wizard.nro.sha256
