@@ -20,3 +20,4 @@ jobs:
           name: HOC-Overclocking-Wizard-beta1
           path: HOC-Overclocking-Wizard.nro
           if-no-files-found: error
+# compile-check 2
