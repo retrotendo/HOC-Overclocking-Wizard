@@ -19,9 +19,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Apply beta3 updater fix
-        run: python3 tools/patch_beta3.py
-
       - name: Build NRO
         run: make -j2
 
