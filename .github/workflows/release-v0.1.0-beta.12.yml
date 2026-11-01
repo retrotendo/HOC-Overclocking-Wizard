@@ -44,6 +44,9 @@ jobs:
       - name: Apply beta12 guide flow
         run: python3 .github/scripts/build_beta12_patch.py
 
+      - name: Remove misplaced recovery cases
+        run: python3 .github/scripts/build_beta12_fix.py
+
       - name: Build NRO
         run: make -j2
 
