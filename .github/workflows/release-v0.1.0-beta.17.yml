@@ -78,6 +78,7 @@ jobs:
             - Config voltages use exact formatting with fractional values preserved.
             - Visible RAM Memory Benchmark remains enabled and continues feeding the later efficiency/Sweet Spot graph.
             - RAM tuning order and GPU/CPU tuning logic are otherwise unchanged.
+            - Rebuilt after split DVB baseline audit.
           files: |
             HOC-Overclocking-Wizard.nro
             HOC-Overclocking-Wizard.nro.sha256
