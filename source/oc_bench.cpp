@@ -4,7 +4,6 @@
 
 extern "C" {
 #include "benchmark/bench.h"
-#include "benchmark/gpu_bench.h"
 #include "benchmark/furmark/run_furmark.h"
 }
 
@@ -26,12 +25,36 @@ void sample(Telemetry& t) {
     t.cpuMv = c.cpuVoltageUv / 1000.0;
     t.gpuMv = c.gpuVoltageUv / 1000.0;
     t.vddqMv = c.vddqVoltageUv / 1000.0;
-    if (c.powerAvgMw > 0) {
-        const double p = c.powerAvgMw / 1000.0;
+    if (c.powerAvgMw != 0) {
+        const double p = std::abs(c.powerAvgMw) / 1000.0;
         if (t.powerSamples == 0) t.batteryPowerW = p;
         else t.batteryPowerW = (t.batteryPowerW * t.powerSamples + p) / double(t.powerSamples + 1);
         ++t.powerSamples;
     }
+}
+
+bool runFpsScene(int which, int seconds, double& fps, Telemetry& telemetry) {
+    seconds = std::max(5, seconds);
+    run_furmark_start(which);
+    svcSleepThread(1'500'000'000LL);
+    if (!run_furmark_running()) return false;
+
+    double sum = 0.0;
+    int samples = 0;
+    const int loops = seconds * 2;
+    for (int i = 0; i < loops && run_furmark_running(); ++i) {
+        const float f = run_furmark_fps();
+        sample(telemetry);
+        if (i >= 2 && f > 0.0f && std::isfinite(f)) {
+            sum += f;
+            ++samples;
+        }
+        svcSleepThread(500'000'000LL);
+    }
+    run_furmark_stop();
+    sample(telemetry);
+    fps = samples ? sum / samples : 0.0;
+    return samples > 0 && fps > 0.0;
 }
 
 }
@@ -68,61 +91,19 @@ RamResult runRam() {
     return r;
 }
 
-GpuResult runGpu(int windows) {
+GpuResult runGpu(int seconds) {
     GpuResult r;
-    windows = std::max(3, windows);
-    double sum = 0.0;
-    int samples = 0;
-    for (int i = 0; i < windows; ++i) {
-        double gflops = 0.0;
-        std::uint64_t dispatches = 0, mismatches = 0;
-        if (!gpu_stress_run(&gflops, &dispatches, &mismatches)) {
-            r.error = "GPU benchmark could not initialize.";
-            gpu_stress_shutdown();
-            return r;
-        }
-        sample(r.telemetry);
-        r.dispatches += dispatches;
-        r.mismatches += mismatches;
-        if (i >= 1 && gflops > 0.0 && std::isfinite(gflops)) {
-            sum += gflops;
-            ++samples;
-        }
-        svcSleepThread(5'000'000);
-    }
-    gpu_stress_shutdown();
-    r.gflops = samples ? sum / samples : 0.0;
-    r.ok = samples > 0 && r.gflops > 0.0 && r.mismatches == 0;
-    if (!r.ok && r.error.empty()) r.error = r.mismatches ? "GPU mismatch detected." : "GPU benchmark returned no score.";
+    // Benchmark Toolbox Furmark scene. Stability/mismatch detection is handled
+    // separately by the Wizard's deko3d verifier before this FPS measurement.
+    r.ok = runFpsScene(0, seconds, r.fps, r.telemetry);
+    if (!r.ok) r.error = "GPU benchmark returned no FPS.";
     return r;
 }
 
 CpuResult runCpu(int seconds) {
     CpuResult r;
-    seconds = std::max(5, seconds);
-    run_furmark_start(4); // Benchmark Toolbox CPU Ray Trace
-    svcSleepThread(1'500'000'000LL);
-    if (!run_furmark_running()) {
-        r.error = "CPU Ray Trace benchmark could not initialize.";
-        return r;
-    }
-
-    double sum = 0.0;
-    int samples = 0;
-    const int loops = seconds * 2;
-    for (int i = 0; i < loops && run_furmark_running(); ++i) {
-        const float fps = run_furmark_fps();
-        sample(r.telemetry);
-        if (i >= 2 && fps > 0.0f && std::isfinite(fps)) {
-            sum += fps;
-            ++samples;
-        }
-        svcSleepThread(500'000'000LL);
-    }
-    run_furmark_stop();
-    sample(r.telemetry);
-    r.fps = samples ? sum / samples : 0.0;
-    r.ok = samples > 0 && r.fps > 0.0;
+    // Benchmark Toolbox CPU Ray Trace scene.
+    r.ok = runFpsScene(4, seconds, r.fps, r.telemetry);
     if (!r.ok) r.error = "CPU Ray Trace benchmark returned no FPS.";
     return r;
 }
