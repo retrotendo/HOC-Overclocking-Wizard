@@ -81,13 +81,13 @@ jobs:
           prerelease: true
           make_latest: false
           body: |
-            Beta 21 improves RAM sweep safety and clarity.
+            Beta 21 improves RAM sweep safety and user-facing clarity.
             - Temporary CPU/GPU/RAM overrides are cleared after every RAM candidate test, whether it passes or fails.
-            - A failed RAM candidate now stops on a clear result page showing the failed MHz and the last stable/max-clock candidate.
-            - Known-unstable stop uses the same result page.
-            - DVB screen now shows the next candidate explicitly and tells the user that Continue applies that DVB Shift and reboots.
+            - The RAM sweep now ends on a clear result page showing the failed MHz and the last stable/max-clock candidate.
+            - RAM tuning pages now use simple user language: left explains what is being done, right says what the user must do next.
+            - ACTUAL ACTIVE VALUES is stage-specific: timings on timing pages, DVB on DVB, HP on HP, and the matching rail on voltage pages.
+            - DVB shows the next candidate explicitly and tells the user when Continue will apply it and reboot.
             - The right YOUR TASK card is instruction-only; duplicate action buttons are removed globally.
-            - Developer-oriented tuning explanations were removed or shortened where they do not help the user act.
             - Beta20 audio reminders, charger guard, benchmark UI and all prior tuning logic remain intact.
           files: |
             HOC-Overclocking-Wizard.nro
