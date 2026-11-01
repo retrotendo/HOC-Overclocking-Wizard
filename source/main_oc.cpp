@@ -363,13 +363,78 @@ void render() {
     if(g_errorModal){gui::ModalView m;m.version=HOC_WIZARD_VERSION;m.eyebrow="WIZARD NOTICE";m.title="Action required";m.body={g_message};m.primaryAction="A  OK";m.tone=gui::ModalTone::Red;gui::presentModal(m);return;}
     if(g_recoveryModal){gui::ModalView m;m.version=HOC_WIZARD_VERSION;m.eyebrow="INTERRUPTED TEST";m.title="Previous candidate did not finish";m.body={"A crash, freeze or reboot occurred while a candidate was being tested.","The Wizard will restore the last known good value before continuing."};m.primaryAction="A  Recover last good value";m.secondaryAction="B  Exit";m.tone=gui::ModalTone::Amber;gui::presentModal(m);return;}
 
-    gui::View v;v.version=HOC_WIZARD_VERSION;v.activeStep=progressStep(g.stage);v.pulse=true;v.haveActiveValues=true;
-    v.values[0]={"CPU",fmt1(g_active.realHz[0]/1e6)+" MHz",false};v.values[1]={"GPU",fmt1(g_active.realHz[1]/1e6)+" MHz",false};v.values[2]={"RAM",fmt1(g_active.realHz[2]/1e6)+" MHz",false};v.values[3]={"VDD2",fmt1(g_active.vdd2VoltageUv/1000.0)+" mV",false};v.values[4]={"VDDQ",fmt1(g_active.vddqVoltageUv/1000.0)+" mV",false};
+    gui::View v;v.version=HOC_WIZARD_VERSION;v.activeStep=progressStep(g.stage);v.pulse=true;v.haveActiveValues=false;
+
+    auto setValue=[&](int i,const char* label,const std::string& value){v.values[i]={label,value,false};};
+    if(g.stage>=Stage::RamPreparation && g.stage<=Stage::RamFinalGraph){
+        v.haveActiveValues=true;
+        const int dvbNow=g.dvbApplied?g.dvbCandidate:g.dvbGood;
+        setValue(0,"RAM",fmt1(g_active.realHz[2]/1e6)+" MHz");
+        setValue(1,"VDD2",fmt1(g_active.vdd2VoltageUv/1000.0)+" mV");
+        setValue(2,"VDDQ",fmt1(g_active.vddqVoltageUv/1000.0)+" mV");
+        setValue(3,"SoC",fmt1(g_active.socVoltageUv/1000.0)+" mV");
+        setValue(4,"DVB Shift",std::to_string(dvbNow));
+    }else if(g.stage>=Stage::GpuPreparation && g.stage<=Stage::GpuRamCombined){
+        v.haveActiveValues=true;
+        setValue(0,"GPU",fmt1(g_active.realHz[1]/1e6)+" MHz");
+        setValue(1,"GPU Voltage",fmt1(g_active.gpuVoltageUv/1000.0)+" mV");
+        setValue(2,"RAM",fmt1(g_active.realHz[2]/1e6)+" MHz");
+        setValue(3,"SoC",fmt1(g_active.socVoltageUv/1000.0)+" mV");
+        setValue(4,"VDD2",fmt1(g_active.vdd2VoltageUv/1000.0)+" mV");
+    }else if(g.stage>=Stage::CpuPreparation && g.stage<=Stage::CpuRamCombined){
+        v.haveActiveValues=true;
+        setValue(0,"CPU",fmt1(g_active.realHz[0]/1e6)+" MHz");
+        setValue(1,"CPU Voltage",fmt1(g_active.cpuVoltageUv/1000.0)+" mV");
+        setValue(2,"RAM",fmt1(g_active.realHz[2]/1e6)+" MHz");
+        if(g.stage==Stage::CpuLowUv || g.stage==Stage::CpuLowVmin){
+            const int lowUvNow=g.lowUvApplied?g.lowUvCandidate:g.lowUvGood;
+            const int lowVminNow=g.lowVminApplied?g.lowVminCandidate:g.lowBestVmin;
+            setValue(3,"Low UV",std::to_string(lowUvNow));
+            setValue(4,"Low VMIN",std::to_string(lowVminNow)+" mV");
+        }else if(g.stage==Stage::CpuTbreak2Set || g.stage==Stage::CpuTbreak2Test || g.stage==Stage::CpuTbreak3Set || g.stage==Stage::CpuTbreak3Test){
+            const int tb=(g.stage==Stage::CpuTbreak2Set || g.stage==Stage::CpuTbreak2Test)?2:3;
+            const int highUvNow=g.highUvApplied?g.highUvCandidate:g.highUvGood;
+            setValue(3,"High UV",std::to_string(highUvNow));
+            setValue(4,"TBreak",std::to_string(tb));
+        }else if(g.stage==Stage::CpuVmax){
+            const int vmaxNow=g.vmaxApplied?g.vmaxCandidate:g.vmaxGood;
+            setValue(3,"High UV",std::to_string(g.highUvGood));
+            setValue(4,"VMAX",std::to_string(vmaxNow)+" mV");
+        }else{
+            const int highUvNow=g.highUvApplied?g.highUvCandidate:g.highUvGood;
+            const int highVminNow=g.highVminApplied?g.highVminCandidate:g.highVminGood;
+            setValue(3,"High UV",std::to_string(highUvNow));
+            setValue(4,"High VMIN",std::to_string(highVminNow)+" mV");
+        }
+    }
     auto print=[&](int row,const std::string&s){gui::printLeft(row,s.c_str());};
 
     switch(g.stage){
-        case Stage::Hardware:{v.stageTitle="Hardware Detection";v.instructionTitle="Detect this console";v.instructionLine1="RAM type selects only the starting table and search context.";v.instructionLine2="A  Detect hardware";gui::begin(v);print(1,"No MHz or mV end value from a reference console is used as a target.");if(g.dramId>=0){print(3,"DRAM ID: "+std::to_string(g.dramId));if(profile())print(4,std::string("Detected RAM: ")+profile()->name+"  |  Tier "+profile()->tier);else print(4,"RAM preset: manual only / unsupported ID");}print(8,"A : Detect / continue");print(9,"B : Exit");gui::present();break;}
-        case Stage::BenchmarkPrep:{u32 pct=0;PsmChargerType ch=PsmChargerType_Unconnected;bool ok=batteryReady(pct,ch);v.stageTitle="Benchmark Preparation";v.fullWidthLayout=true;gui::begin(v);print(1,"All curve measurements must use the same conditions for meaningful comparisons.");print(3,"Battery: "+(ok?std::to_string(pct)+" %":"unavailable"));print(4,std::string("Charger: ")+(ok&&ch!=PsmChargerType_Unconnected?"connected":"NOT detected"));print(6,"Required: battery >=95%, charger connected, brightness fixed at 100%.");print(7,"Disable screen dimming / system sleep and keep dock/handheld state unchanged.");print(9,"Battery-side HOC power is logged only as supplemental telemetry while charging.");print(12,"A : Conditions are set / continue");print(13,"B : Exit");gui::present();break;}
+        case Stage::Hardware:{
+            const bool detected=g.dramId>=0;
+            v.stageTitle="Hardware Detection";
+            v.instructionTitle=detected?"Hardware detected":"Detect this console";
+            v.instructionLine1=detected?"Review the detected RAM before tuning begins.":"The Wizard will identify the installed RAM and select its HOC table.";
+            v.instructionLine2=detected?"A  Continue":"A  Detect hardware";
+            gui::begin(v);
+            if(!detected){
+                print(1,"Detect the installed memory before the OC search starts.");
+            }else{
+                print(1,"DRAM ID: "+std::to_string(g.dramId));
+                if(profile()){
+                    print(3,std::string("Detected RAM: ")+profile()->name+"  |  Tier "+profile()->tier);
+                    print(4,"Expected Max OC: "+std::to_string(profile()->minMHz)+"-"+std::to_string(profile()->maxMHz)+" MHz");
+                    print(6,"The measured stable limit may differ from the expected RAM-class range.");
+                }else{
+                    print(3,"RAM preset: manual only / unsupported ID");
+                    print(4,"Expected Max OC: unavailable");
+                }
+            }
+            print(8,detected?"A : Continue":"A : Detect hardware");
+            print(9,"B : Exit");
+            gui::present();break;
+        }
+        case Stage::BenchmarkPrep:{u32 pct=0;PsmChargerType ch=PsmChargerType_Unconnected;bool ok=batteryReady(pct,ch);v.stageTitle="Benchmark Preparation";v.fullWidthLayout=true;gui::begin(v);print(1,"All curve measurements must use the same conditions for meaningful comparisons.");print(3,"Battery: "+(ok?std::to_string(pct)+" %":"unavailable"));print(4,std::string("Charger: ")+(ok&&ch!=PsmChargerType_Unconnected?"connected":"NOT detected"));print(6,"Required: battery 100%, charger connected, brightness fixed at 100%.");print(7,"Battery must read 100% so charging current does not bias benchmark comparisons.");print(9,"Disable screen dimming / system sleep and keep dock/handheld state unchanged.");print(12,"A : Conditions are set / continue");print(13,"B : Exit");gui::present();break;}
         case Stage::RamPreparation:{v.stageTitle="RAM Preparation";v.preparationLayout=true;v.hideValuesCard=true;v.instructionTitle="Set the RAM search baseline";v.instructionLine1="Common timings first; HP and ST are validated after max clock discovery.";v.instructionLine2="Y  Apply automatically";const auto*p=profile();gui::begin(v);if(!p){print(1,"No safe automatic timing profile is available for this DRAM ID.");print(3,"Unknown / ambiguous 8 GB memory is never assigned guessed timings.");print(8,"B : Exit");}else{print(1,"The HOC RAM table supplies starting values only. The console determines the final result.");print(3,std::string("RAM profile: ")+p->name+"  |  expected class "+std::to_string(p->minMHz)+"-"+std::to_string(p->maxMHz)+" MHz");print(5,"Search controls: HP OFF  |  DVB Shift 5  |  SoC VMAX 1200 mV ceiling");print(6,"VDD2: "+std::to_string(p->vdd2Mv)+" mV  |  VDDQ: "+std::to_string(p->vddqMv)+" mV");std::ostringstream t;t<<"Common timings: ";for(int i=0;i<8;++i){if(i)t<<'-';t<<p->common.t[i];}print(7,t.str());print(10,"A : Check manually set values");print(11,"Y : Apply baseline automatically + reboot");print(12,"B : Exit");}gui::present();break;}
         case Stage::RamSweep:{int freq=(g.ramSearchIndex>=0)?int(oc::RAM_STEPS_MHZ[g.ramSearchIndex]):0;v.stageTitle="RAM Clock Search";v.instructionTitle="Test the next RAM clock";v.instructionLine1="Real-clock / PLL check, stability test and Memory Benchmark.";v.instructionLine2="A  Start test";gui::begin(v);print(1,"The table range is guidance, not a hard device limit; search may continue to the HOC safe ceiling.");print(3,"Candidate: "+std::to_string(freq)+" MHz");print(4,"Last stable: "+std::to_string(g.ramStableMaxMHz)+" MHz");print(8,"A : Run candidate test");print(9,"X : Known unstable / stop upward search");print(10,"B : Exit");gui::present();break;}
         case Stage::RamGraph:case Stage::RamFinalGraph:{v.stageTitle=g.stage==Stage::RamGraph?"RAM Capability Result":"RAM Final Result";v.fullWidthLayout=true;v.chartLayout=true;v.chartTitle="RAM performance / electrical-cost curve";v.chartXLabel="RAM MHz";v.chartCostLabel="Measured rail cost";v.chartPoints=chart(ramPoints);v.chartSummary="Stable Max: "+std::to_string(g.ramStableMaxMHz)+" MHz   |   Recommended: "+std::to_string(g.ramRecommendedMHz)+" MHz";gui::begin(v);print(12,"A : Continue");print(13,"B : Exit");gui::present();break;}
@@ -676,8 +741,8 @@ int main(int argc,char**argv){
         if(k&HidNpadButton_Minus){resetAll();redraw=true;continue;}
         if(k&HidNpadButton_B){saveState();break;}
 
-        if(g.stage==Stage::Hardware&&(k&HidNpadButton_A)){detectHardware();if(!g_errorModal){if(!profile())modalError("This DRAM ID has no safe automatic profile. Beta 1 will not write guessed timings.");else{g.stage=Stage::BenchmarkPrep;saveState();}}redraw=true;continue;}
-        if(g.stage==Stage::BenchmarkPrep&&(k&HidNpadButton_A)){u32 pct=0;PsmChargerType ch=PsmChargerType_Unconnected;batteryReady(pct,ch);if(ch==PsmChargerType_Unconnected)modalError("Connect the charger before starting the benchmark series.");else if(pct<95)modalError("Charge the console to at least 95% before starting the benchmark series.");else if(!backupOriginal()){}else{g.benchmarkReady=1;g.stage=Stage::RamPreparation;saveState();}redraw=true;continue;}
+        if(g.stage==Stage::Hardware&&(k&HidNpadButton_A)){if(g.dramId<0){detectHardware();if(!g_errorModal&&!profile())modalError("This DRAM ID has no safe automatic timing profile. Automatic RAM preparation is unavailable.");}else if(profile()){g.stage=Stage::BenchmarkPrep;saveState();}else modalError("Automatic RAM preparation is unavailable for this DRAM ID.");redraw=true;continue;}
+        if(g.stage==Stage::BenchmarkPrep&&(k&HidNpadButton_A)){u32 pct=0;PsmChargerType ch=PsmChargerType_Unconnected;batteryReady(pct,ch);if(ch==PsmChargerType_Unconnected)modalError("Connect the charger before starting the benchmark series.");else if(pct<100)modalError("Charge the console to 100% before starting the benchmark series.");else if(!backupOriginal()){}else{g.benchmarkReady=1;g.stage=Stage::RamPreparation;saveState();}redraw=true;continue;}
         if(g.stage==Stage::RamPreparation){if(k&HidNpadButton_Y){prepareRamAuto();redraw=true;continue;}if(k&HidNpadButton_A){const auto*p=profile();HocMonOcPreparation d{};d.uncappedClocks=true;d.hpMode=false;d.ramMaxKHz=3400000U;d.vdd2Uv=p->vdd2Mv*1000U;d.vddqUv=p->vddqMv*1000U;d.dvbShift=5;d.socVmaxUv=1200;for(int i=0;i<8;++i)d.timings[i]=p->common.t[i];u32 mm=0;Result rc=hocmonVerifyOcPreparation(&d,&mm);if(R_SUCCEEDED(rc)&&mm==0){g.ramHpMode=0;g.ramTimingMode=0;g.dvbGood=5;g.dvbCandidate=4;g.vdd2GoodUv=int(d.vdd2Uv);g.vdd2CandidateUv=g.vdd2GoodUv-12500;g.vddqGoodMv=int(p->vddqMv);g.vddqCandidateMv=g.vddqGoodMv-10;g.ramSearchIndex=oc::firstRamSearchIndex(p);g.ramSearchEndIndex=ramEndIndex();requestReboot(Stage::RamSweep);}else modalError("Preparation values do not match. Set the shown Common/HP/DVB/rail values or use automatic setup.");redraw=true;continue;}}
         if(g.stage==Stage::RamSweep){if(k&HidNpadButton_A){runRamCandidate();redraw=true;continue;}if(k&HidNpadButton_X){finishRamSweep();redraw=true;continue;}}
         if(g.stage==Stage::RamGraph&&(k&HidNpadButton_A)){g.stage=Stage::RamHpSet;saveState();redraw=true;continue;}
