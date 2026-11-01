@@ -167,8 +167,9 @@ std::string fmt1(double v) { char b[48]; std::snprintf(b,sizeof(b),"%.1f",v); re
 void saveState() {
     ensureDir(APP_DIR);
     std::ofstream f(STATE_FILE,std::ios::trunc); if(!f) return;
+f << "stage=" << int(g.stage) << '\n';
 #define W(x) f << #x << '=' << g.x << '\n'
-    W(stage); W(dramId); W(is8GB); W(consoleType); W(profileIndex); W(benchmarkReady);
+    W(dramId); W(is8GB); W(consoleType); W(profileIndex); W(benchmarkReady);
     W(ramSearchIndex); W(ramSearchEndIndex); W(ramRecommendedMHz); W(ramStableMaxMHz); W(ramTimingMode);
     W(vdd2GoodUv); W(vdd2CandidateUv); W(vdd2Applied); W(vddqGoodMv); W(vddqCandidateMv); W(vddqApplied);
     W(socTableMHz); W(socGoodMv); W(socCandidateMv); W(socApplied);
