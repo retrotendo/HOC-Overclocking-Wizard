@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -19,23 +19,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Apply beta3 patch
-        run: python3 tools/patch_beta3_clean.py
-
-      - name: Build patched source
+      - name: Build committed source
         run: make -j2
 
-      - name: Commit exact tested source
-        run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git config user.name "retrotendo"
-          git config user.email "info@retrotendo.de"
-          git add source/updater.cpp Makefile RELEASE_NOTES_v0.1.0-beta.3.md
-          git commit -m "Fix startup updater socket lifecycle for beta3"
-          git push
+      - name: Create checksum
+        run: sha256sum HOC-Overclocking-Wizard.nro > HOC-Overclocking-Wizard.nro.sha256
 
-      - name: Upload tested NRO
+      - name: Upload final beta3 build
         uses: actions/upload-artifact@v4
         with:
-          name: HOC-Overclocking-Wizard-beta3-tested
-          path: HOC-Overclocking-Wizard.nro
+          name: HOC-Overclocking-Wizard-beta3-final
+          path: |
+            HOC-Overclocking-Wizard.nro
+            HOC-Overclocking-Wizard.nro.sha256
