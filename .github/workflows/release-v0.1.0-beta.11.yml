@@ -20,13 +20,17 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import textwrap
           w=Path('.github/workflows/release-v0.1.0-beta.10.yml').read_text()
           blocks=[]; pos=0
           while True:
               try: start=w.index("          python3 - <<'PY'\n",pos)+len("          python3 - <<'PY'\n")
               except ValueError: break
-              end=w.index("\n          PY",start); blocks.append(w[start:end]); pos=end+1
-          for i,code in enumerate(blocks): exec(compile(code,f'beta10-{i}','exec'))
+              end=w.index("\n          PY",start)
+              blocks.append(textwrap.dedent(w[start:end]))
+              pos=end+1
+          for i,code in enumerate(blocks):
+              exec(compile(code,f'beta10-{i}','exec'))
           PY
       - name: Apply beta11 UI simplification
         shell: bash
