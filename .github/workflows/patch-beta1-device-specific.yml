@@ -1,0 +1,167 @@
+name: Patch beta1 device-specific limits
+on:
+  push:
+    branches: [oc-wizard-beta1]
+    paths:
+      - '.github/workflows/patch-beta1-device-specific.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: oc-wizard-beta1
+      - name: Remove static development-device assumptions
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          p = Path('source/main_oc.cpp')
+          s = p.read_text()
+
+          old = '''constexpr int CPU_SAFE_MAX_MHZ = 2397;  // HOC Mariko safe max with UV.
+          constexpr int GPU_DAILY_CAP_MHZ = 1228; // Current HOC sched-off daily guidance.
+          constexpr int GPU_EXTENDED_MAX_MHZ = 1305; // Technical High-UV table range, not automatic daily cap.
+          constexpr int CPU_LOW_VMIN_FLOOR = 590;
+          constexpr int CPU_HIGH_VMIN_FLOOR = 720;
+          constexpr int CPU_VMAX_SAFE = 1120;
+          constexpr int VDDQ_MIN_MV = 400;
+          constexpr int VDD2_MIN_UV = 912500;
+          constexpr int GPU_MIN_MV = 480;
+
+          const int GPU_FREQS[] = {768,844,921,998,1075,1152,1228,1267,1305};'''
+          new = '''constexpr int CPU_SAFE_MAX_MHZ = 2397;  // HOC Mariko safe clock envelope with UV.
+          constexpr int GPU_SAFE_MAX_MHZ = 1382;   // HOC Mariko safe clock envelope; device must still validate it.
+          constexpr int GPU_AUTO_VMAX_MV = 825;   // First HOC Mariko GPU Vmax threshold; automatic search never exceeds it.
+          constexpr int CPU_LOW_VMIN_FLOOR = 590; // conservative guide floor for automatic Low search
+          constexpr int CPU_HIGH_VMIN_FLOOR = 650; // current HOC UI High VMIN lower bound
+          constexpr int CPU_VMAX_SAFE = 1120;      // NVIDIA/HOC CPU voltage rating used as automatic ceiling
+          constexpr int VDDQ_MIN_MV = 400;
+          constexpr int VDD2_MIN_UV = 912500;
+          constexpr int GPU_MIN_MV = 480;
+
+          const int GPU_FREQS[] = {768,844,921,998,1075,1152,1228,1267,1305,1344,1382};'''
+          if old not in s:
+              raise SystemExit('constants block not found')
+          s = s.replace(old, new, 1)
+
+          old = '''void analyzeGpu(){auto a=oc::analyzeSweep(gpuPoints);if(a.recommended>=0){g.gpuRecommendedMHz=int(gpuPoints[a.recommended].requestedMHz);g.gpuStableMaxMHz=int(gpuPoints[a.stableMax].requestedMHz);if(g.gpuRecommendedMHz>GPU_DAILY_CAP_MHZ)g.gpuRecommendedMHz=GPU_DAILY_CAP_MHZ;}saveState();}'''
+          new = '''void analyzeGpu(){auto a=oc::analyzeSweep(gpuPoints);if(a.recommended>=0){g.gpuRecommendedMHz=int(gpuPoints[a.recommended].requestedMHz);g.gpuStableMaxMHz=int(gpuPoints[a.stableMax].requestedMHz);}saveState();}'''
+          if old not in s:
+              raise SystemExit('analyzeGpu block not found')
+          s = s.replace(old, new, 1)
+
+          start = s.index('bool prepareGpu(){')
+          end = s.index('\nvoid runGpuRam(){', start)
+          replacement = r'''bool prepareGpu(){
+              if(!backupOriginal())return false;
+              std::string e;
+              if(!occonfig::setGpuUvTable(4,e)||!occonfig::setGpuVmin(580,e)||!occonfig::setGpuVmax(GPU_AUTO_VMAX_MV,e)){modalError(e);return false;}
+              for(int f:GPU_FREQS){if(f>GPU_SAFE_MAX_MHZ)break;if(!occonfig::setGpuPoint(f,GPU_AUTO_VMAX_MV,e)){modalError(e);return false;}}
+              g.gpuPrepApplied=1;g.gpuIndex=0;g.gpuHaveBaseline=0;g.gpuGoodMv=GPU_AUTO_VMAX_MV;g.gpuCandidateMv=GPU_AUTO_VMAX_MV-5;g.gpuApplied=0;saveState();
+              return requestReboot(Stage::GpuTune);
+          }
+
+          void finishGpuSweep(){
+              analyzeGpu();
+              if(g.gpuRecommendedMHz<=0){modalError("No stable GPU point was measured inside the automatic safety envelope.");return;}
+              g.stage=Stage::GpuGraph;saveState();
+          }
+
+          void finishGpuPoint(){
+              int f=GPU_FREQS[g.gpuIndex];std::string e;
+              if(!setOverrides(CPU_BASE_HZ,u32(f)*1000000U,RAM_BASE_HZ,e)){modalError(e);return;}
+              auto b=ocbench::runGpu(7);if(!b.ok){modalError(b.error);return;}
+              oc::SweepPoint p;p.domain=oc::Domain::Gpu;p.requestedMHz=f;p.realMHz=b.telemetry.realGpuMHz;p.railMv=g.gpuGoodMv;p.performance=b.fps;p.batteryPowerW=b.telemetry.batteryPowerW;p.powerReliable=false;p.stable=true;p.context="Base RAM intrinsic GPU curve";recordPoint(gpuPoints,p);
+              ++g.gpuIndex;g.gpuHaveBaseline=0;g.gpuGoodMv=GPU_AUTO_VMAX_MV;g.gpuCandidateMv=GPU_AUTO_VMAX_MV-5;g.gpuApplied=0;
+              if(g.gpuIndex>=int(sizeof(GPU_FREQS)/sizeof(GPU_FREQS[0])))finishGpuSweep();else saveState();
+          }
+
+          void runGpuTune(){
+              if(g.gpuIndex>=int(sizeof(GPU_FREQS)/sizeof(GPU_FREQS[0]))){finishGpuSweep();return;}
+              int f=GPU_FREQS[g.gpuIndex];
+              if(f>GPU_SAFE_MAX_MHZ){finishGpuSweep();return;}
+              std::string e;
+
+              // First prove this clock can really run at the conservative automatic
+              // voltage ceiling. A capped/unstable baseline ends the upward clock search;
+              // it is not mislabelled as a voltage-undervolt failure.
+              if(!g.gpuHaveBaseline){
+                  if(!setOverrides(CPU_BASE_HZ,u32(f)*1000000U,RAM_BASE_HZ,e)){
+                      if(e.find("Requested and Real clocks do not match")!=std::string::npos){finishGpuSweep();return;}
+                      modalError(e);return;
+                  }
+                  if(!runStress(stress::Kind::Gpu,45,"GPU Capability Baseline","GPU "+std::to_string(f)+" MHz @ "+std::to_string(GPU_AUTO_VMAX_MV)+" mV")){finishGpuSweep();return;}
+                  auto b=ocbench::runGpu(5);if(!b.ok){modalError(b.error);return;}
+                  if(std::abs(b.telemetry.realGpuMHz-f)>5.0){finishGpuSweep();return;}
+                  g.gpuGoodMv=GPU_AUTO_VMAX_MV;g.gpuCandidateMv=GPU_AUTO_VMAX_MV-5;g.gpuHaveBaseline=1;g.gpuApplied=0;saveState();return;
+              }
+
+              // state 2 means a failed/capped candidate was restored and rebooted;
+              // benchmark the actual last-good voltage before advancing.
+              if(g.gpuApplied==2){finishGpuPoint();return;}
+
+              if(g.gpuApplied==0){
+                  if(g.gpuCandidateMv<GPU_MIN_MV){finishGpuPoint();return;}
+                  if(!occonfig::setGpuPoint(f,g.gpuCandidateMv,e)){modalError(e);return;}
+                  g.gpuApplied=1;saveState();requestReboot(Stage::GpuTune);return;
+              }
+
+              if(!setOverrides(CPU_BASE_HZ,u32(f)*1000000U,RAM_BASE_HZ,e)){
+                  // A lower voltage can make HOC/PCV cap real frequency. Treat that
+                  // exactly like instability: restore the last-good point.
+                  if(!occonfig::setGpuPoint(f,g.gpuGoodMv,e)){modalError(e);return;}
+                  g.gpuApplied=2;saveState();requestReboot(Stage::GpuTune);return;
+              }
+              bool pass=runStress(stress::Kind::Gpu,45,"GPU Voltage Stability","GPU "+std::to_string(f)+" MHz @ "+std::to_string(g.gpuCandidateMv)+" mV");
+              if(pass){g.gpuGoodMv=g.gpuCandidateMv;g.gpuCandidateMv-=5;g.gpuApplied=0;saveState();}
+              else{if(!occonfig::setGpuPoint(f,g.gpuGoodMv,e)){modalError(e);return;}g.gpuApplied=2;saveState();requestReboot(Stage::GpuTune);}
+          }
+          '''
+          s = s[:start] + replacement + s[end:]
+
+          # Replace the GPU preparation and tune UI cases as a unit.
+          start = s.index('        case Stage::GpuPreparation:')
+          end = s.index('        case Stage::GpuGraph:', start)
+          ui = r'''        case Stage::GpuPreparation:{v.stageTitle="GPU Preparation";v.instructionTitle="Create a conservative GPU capability baseline";v.instructionLine1="High UV table; each clock must prove real frequency before voltage tuning.";v.instructionLine2="A  Apply + reboot";gui::begin(v);print(1,"GPU points start at the automatic 825 mV HOC threshold, then each stable point is reduced in 5 mV steps.");print(3,"Automatic clock search: 768-1382 MHz within HOC's Mariko safe clock envelope.");print(4,"Stable Max and Daily Recommended are calculated from this console's own measured curve.");print(8,"A : Apply GPU capability baseline + reboot");print(10,"B : Exit");gui::present();break;}
+                  case Stage::GpuTune:{int f=GPU_FREQS[std::clamp(g.gpuIndex,0,int(sizeof(GPU_FREQS)/sizeof(GPU_FREQS[0]))-1)];v.stageTitle="GPU Voltage Curve";v.instructionTitle=!g.gpuHaveBaseline?"Verify this GPU clock at the safe search ceiling":(g.gpuApplied==2?"Measure the restored stable point":(g.gpuApplied?"Test the voltage candidate":"Apply the next voltage candidate"));v.instructionLine1=!g.gpuHaveBaseline?"Real clock + stability + Benchmark Toolbox FPS must pass first.":(g.gpuApplied==2?"The last stable voltage is active after reboot.":"Stability verifier first, Benchmark Toolbox FPS second.");v.instructionLine2="A  Continue";gui::begin(v);print(1,"Base RAM is used here so a high-RAM DVFS floor cannot hide the intrinsic GPU curve.");print(3,"GPU clock: "+std::to_string(f)+" MHz");if(!g.gpuHaveBaseline){print(4,"Capability ceiling: "+std::to_string(GPU_AUTO_VMAX_MV)+" mV");print(5,"A fail or capped Real Clock ends the upward GPU clock search.");}else{print(4,"Last good: "+std::to_string(g.gpuGoodMv)+" mV");if(g.gpuApplied!=2)print(5,"Candidate: "+std::to_string(g.gpuCandidateMv)+" mV");}print(8,"A : Continue");if(g.gpuHaveBaseline&&g.gpuApplied!=2)print(9,"X : Keep last good voltage for this point");print(10,"B : Exit");gui::present();break;}
+          '''
+          s = s[:start] + ui + s[end:]
+
+          # Safety check: no old static cap language/code may remain.
+          forbidden = ['GPU_DAILY_CAP_MHZ','GPU_EXTENDED_MAX_MHZ','capped at the current 1228']
+          for needle in forbidden:
+              if needle in s:
+                  raise SystemExit(f'old static GPU assumption still present: {needle}')
+
+          p.write_text(s)
+
+          # Keep config writer aligned with the current HOC UI High VMIN range.
+          cfg = Path('source/oc_config.cpp')
+          cs = cfg.read_text()
+          old = 'v[i->cpuHighVmin]=std::clamp(highVminMv,590,1200);'
+          new = 'v[i->cpuHighVmin]=std::clamp(highVminMv,650,900);'
+          if old not in cs:
+              raise SystemExit('CPU High VMIN clamp not found')
+          cfg.write_text(cs.replace(old,new,1))
+
+          # Remove bootstrap/reference files that are no longer part of the OC app.
+          for name in [
+              'RELEASE_NOTES_v1.0.0-beta.md',
+              'source/main.cpp',
+              'source/benchmark/gpu_bench.cpp',
+              'source/benchmark/gpu_bench.h',
+              'tools/patch_oc_ui.py',
+          ]:
+              Path(name).unlink(missing_ok=True)
+      - name: Commit final device-specific logic
+        run: |
+          set -euo pipefail
+          git config user.name retrotendo
+          git config user.email info@retrotendo.de
+          git add -A
+          git commit -m 'Make GPU and High VMIN searches device-specific'
+          git push origin HEAD:oc-wizard-beta1
