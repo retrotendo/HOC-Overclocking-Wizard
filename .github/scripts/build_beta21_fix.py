@@ -1,84 +1,181 @@
 from pathlib import Path
+import re
 
-# YOUR TASK is instruction-only. Buttons/actions stay on the left.
-p=Path('source/gui_console.cpp')
-s=p.read_text()
-start=s.find('void drawInstructionCard()')
-if start < 0:
-    raise SystemExit('beta21 drawInstructionCard missing')
-end=s.find('\n}\n', start)
-if end < 0:
-    raise SystemExit('beta21 drawInstructionCard end missing')
-end += 3
-block=s[start:end]
-lines=[]
-for line in block.splitlines(True):
-    if 'roundedRect(x + 22, y + 126' in line:
-        continue
-    if 'g_view.instructionLine2' in line:
-        continue
-    lines.append(line)
-newblock=''.join(lines)
-s=s[:start]+newblock+s[end:]
-p.write_text(s)
 
-# Temporary private testing shortcuts for this beta only.
-# ZL + ZR + Plus  = force PASS
-# ZL + ZR + Minus = force FAIL
-# They are intentionally not shown anywhere in the normal UI.
-p=Path('source/stress_tests.cpp')
-t=p.read_text()
-old='''    bool cancelled = false;\n    bool powerLost = false;'''
-new='''    bool cancelled = false;\n    bool powerLost = false;\n    bool developerForcePass = false;\n    bool developerForceFail = false;'''
-if old not in t:
-    raise SystemExit('beta21 stress state marker missing')
-t=t.replace(old,new,1)
+def must_replace(s, old, new, name, count=1):
+    if old not in s:
+        raise SystemExit(f"beta21-fix marker missing: {name}")
+    return s.replace(old, new, count)
 
-old='''        padUpdate(&pad);\n        const u64 down = padGetButtonsDown(&pad);\n        if (down & HidNpadButton_B) {\n            cancelled = true;\n            break;\n        }'''
-new='''        padUpdate(&pad);\n        const u64 down = padGetButtonsDown(&pad);\n        const u64 held = padGetButtons(&pad);\n        const u64 devChord = HidNpadButton_ZL | HidNpadButton_ZR;\n        if ((held & devChord) == devChord && (down & HidNpadButton_Plus)) {\n            developerForcePass = true;\n            break;\n        }\n        if ((held & devChord) == devChord && (down & HidNpadButton_Minus)) {\n            developerForceFail = true;\n            break;\n        }\n        if (down & HidNpadButton_B) {\n            cancelled = true;\n            break;\n        }'''
-if old not in t:
-    raise SystemExit('beta21 stress input marker missing')
-t=t.replace(old,new,1)
 
-old='''    if (powerLost) {\n        out.outcome = Outcome::PowerLost;\n        out.detail = chargerError.empty() ? powerguard::kDisconnected : chargerError;\n    } else if (cancelled) {'''
-new='''    if (developerForcePass) {\n        out.outcome = Outcome::Pass;\n        out.errors = 0;\n        out.mismatches = 0;\n        out.detail = "Developer shortcut: forced PASS.";\n    } else if (developerForceFail) {\n        out.outcome = Outcome::Fail;\n        out.errors = 1;\n        out.detail = "Developer shortcut: forced FAIL.";\n    } else if (powerLost) {\n        out.outcome = Outcome::PowerLost;\n        out.detail = chargerError.empty() ? powerguard::kDisconnected : chargerError;\n    } else if (cancelled) {'''
-if old not in t:
-    raise SystemExit('beta21 stress result marker missing')
-t=t.replace(old,new,1)
-p.write_text(t)
+def replace_function(src, signature, replacement):
+    pos = src.find(signature)
+    if pos < 0:
+        raise SystemExit(f"beta21-fix function missing: {signature}")
+    brace = src.find('{', pos)
+    depth = 0
+    end = None
+    for i in range(brace, len(src)):
+        if src[i] == '{':
+            depth += 1
+        elif src[i] == '}':
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+    if end is None:
+        raise SystemExit(f"beta21-fix unbalanced function: {signature}")
+    return src[:pos] + replacement + src[end:]
 
-# Remove remaining internal/developer explanations that do not help the user act.
-p=Path('source/main_oc.cpp')
-m=p.read_text()
-replacements={
-    'The split is selected only after Low and High curves are known.':'The Wizard will compare the available TBreak settings.',
-    'This is tuned after TBreak so the lower High anchor is known.':'The Wizard will lower High VMIN step by step.',
-    'A lower Real Clock means the cap is too low; that is not a successful undervolt.':'The requested CPU clock must stay active during the test.',
-    'Base RAM is used here so a high-RAM DVFS floor cannot hide the intrinsic GPU curve.':'The Wizard will test each GPU clock and find its lowest stable voltage.',
-    'A High UV level is accepted only if all retained High CPU points pass with final RAM.':'The Wizard will test stronger High UV levels until the first failure.',
-    'Low UV is not judged from one idle/low clock. Both ends of the Low curve must work.':'The Wizard will test stronger Low UV levels until the first failure.',
-}
-for a,b in replacements.items():
-    m=m.replace(a,b)
+
+# -----------------------------------------------------------------------------
+# YOUR TASK = information only. All actionable buttons remain on the left card.
+# -----------------------------------------------------------------------------
+p = Path('source/gui_console.cpp')
+g = p.read_text()
+new_card = r'''void drawInstructionCard() {
+    const int x = 835, y = 158, w = 405, h = 205;
+    drawCard(x, y, w, h, true);
+    drawLabel(x + 24, y + 20, "YOUR TASK");
+    drawText(x + 24, y + 52, 23, C_TEXT,
+             fitText(g_view.instructionTitle.empty() ? "Continue Wizard" : g_view.instructionTitle, 23, w - 48));
+    if (!g_view.instructionLine1.empty())
+        drawText(x + 24, y + 91, 16, C_MUTED, fitText(g_view.instructionLine1, 16, w - 48));
+}'''
+g = replace_function(g, 'void drawInstructionCard()', new_card)
+p.write_text(g)
+
+
+# -----------------------------------------------------------------------------
+# Main wizard fixes.
+# -----------------------------------------------------------------------------
+p = Path('source/main_oc.cpp')
+m = p.read_text()
+
+# Track the actual stress outcome. A user cancel / technical abort must never be reported as
+# "Detected errors" and must not establish the max-clock limit.
+m = must_replace(
+    m,
+    'HocMonClocks g_active{};\n',
+    'HocMonClocks g_active{};\nstress::Outcome g_lastStressOutcome = stress::Outcome::Pass;\nstd::string g_lastStressDetail;\n',
+    'stress result globals')
+
+m = must_replace(
+    m,
+    '        auto r=stress::run(k,seconds,title,ctx);',
+    '        auto r=stress::run(k,seconds,title,ctx);\n        g_lastStressOutcome=r.outcome;\n        g_lastStressDetail=r.detail;',
+    'capture stress result')
+
+# Temporary override lifetime is one complete tuning test function. Stress + benchmark inside the
+# same function still see the requested clocks; every return path clears CPU/GPU/RAM afterwards.
+clear_marker = 'void clearOverrides(){hocmonSetOverride(HocMonModule_CPU,0);hocmonSetOverride(HocMonModule_GPU,0);hocmonSetOverride(HocMonModule_MEM,0);}\n'
+cleanup_decl = clear_marker + '''\nstruct OverrideCleanupScope {\n    ~OverrideCleanupScope(){ clearOverrides(); }\n};\n'''
+m = must_replace(m, clear_marker, cleanup_decl, 'override cleanup scope')
+
+# Max-clock candidate: classify genuine RAM stability failure separately from cancel/technical
+# interruption. The beta21 result stage remains the user-facing summary page.
+new_ram_candidate = r'''void runRamCandidate(){
+    if(g.ramSearchIndex<0||g.ramSearchIndex>g.ramSearchEndIndex){finishRamSweep();return;}
+    const int freq=int(oc::RAM_STEPS_MHZ[g.ramSearchIndex]);std::string e;
+    g.ramFailedMHz=0;
+    if(!guardRamConfig("RAM clock test"))return;
+    if(!setRamOverrides(CPU_BASE_HZ,GPU_BASE_HZ,u32(freq)*1000000U,e)){
+        modalError("RAM "+std::to_string(freq)+" MHz could not be activated. "+e+" This candidate was not evaluated; verify the HOC settings and retry.");
+        return;
+    }
+    if(!runStress(stress::Kind::Ram,60,"RAM Clock Stability - "+std::to_string(freq)+" MHz","Testing RAM: "+std::to_string(freq)+" MHz")){
+        if(g_lastStressOutcome==stress::Outcome::Fail){
+            g.ramFailedMHz=freq;
+            finishRamSweep();
+        }else if(g_lastStressOutcome==stress::Outcome::Cancelled){
+            modalError("RAM "+std::to_string(freq)+" MHz test was cancelled. This candidate was not evaluated; retry the same clock.");
+        }else{
+            modalError("RAM "+std::to_string(freq)+" MHz test did not complete. "+g_lastStressDetail+" This candidate was not evaluated; retry the same clock.");
+        }
+        return;
+    }
+    auto b=ocbench::runRam("RAM "+std::to_string(freq)+" MHz");
+    if(!b.ok){
+        modalError("Memory Benchmark failed at "+std::to_string(freq)+" MHz: "+b.error+" This candidate was not evaluated; retry the benchmark.");
+        return;
+    }
+    oc::SweepPoint p;p.domain=oc::Domain::Ram;p.requestedMHz=freq;p.realMHz=b.telemetry.realRamMHz;p.railMv=std::uint32_t(std::round(b.telemetry.socMv));p.auxMv=std::uint32_t(std::round(b.telemetry.vdd2Mv));p.performance=b.score;p.latencyNs=b.ramNs;p.bandwidthMBs=b.cpuRead+b.gpuRead;p.batteryPowerW=b.telemetry.batteryPowerW;p.powerReliable=false;p.stable=true;p.context="Common / HP off / DVB8 / 66MHz Step Mode";recordPoint(ramPoints,p);g.ramStableMaxMHz=freq;
+    if(g.ramSearchIndex>=g.ramSearchEndIndex)finishRamSweep();else{++g.ramSearchIndex;saveState();}
+}'''
+m = replace_function(m, 'void runRamCandidate()', new_ram_candidate)
+
+# On the left, state explicitly that the number is the NEXT DVB candidate. On the right, the
+# instruction title already says "Continue to apply DVB Shift X and reboot" before application.
+m = must_replace(
+    m,
+    'case Stage::RamDvb:{v.stageTitle="RAM DVB Optimization";v.instructionTitle=',
+    'case Stage::RamDvb:{v.stageTitle=g.dvbApplied?("DVB Shift "+std::to_string(g.dvbCandidate)+" Validation"):"Next DVB Candidate to Test";v.instructionTitle=',
+    'DVB stage title')
+
+# Apply the cleanup scope to every real tuning function that sets a temporary override and then
+# runs a stress test and/or benchmark. This does not change tuning values or order.
+def inject_cleanup(src):
+    inserts=[]
+    pattern=re.compile(r'\b(?:void|bool)\s+([A-Za-z_]\w*)\s*\([^;{}]*\)\s*\{')
+    for mt in pattern.finditer(src):
+        name=mt.group(1)
+        if name in {'setOverrides','setRamOverrides','runStress','requestReboot'}:
+            continue
+        brace=src.find('{',mt.start())
+        depth=0; end=None
+        for i in range(brace,len(src)):
+            if src[i]=='{': depth+=1
+            elif src[i]=='}':
+                depth-=1
+                if depth==0:
+                    end=i+1; break
+        if end is None:
+            continue
+        body=src[brace+1:end-1]
+        owns_override=('setOverrides(' in body or 'setRamOverrides(' in body)
+        does_test=('runStress(' in body or 'ocbench::run' in body)
+        if owns_override and does_test and 'OverrideCleanupScope overrideCleanup;' not in body:
+            inserts.append((brace+1,name))
+    for pos,name in reversed(inserts):
+        src=src[:pos]+f'\n    OverrideCleanupScope overrideCleanup; // clear CPU/GPU/RAM temporary overrides after {name}\n'+src[pos:]
+    return src,[name for _,name in inserts]
+
+m,injected=inject_cleanup(m)
+print('Beta21 override cleanup functions:', ', '.join(injected))
+if 'runRamCandidate' not in injected:
+    raise SystemExit('beta21-fix did not add cleanup to runRamCandidate')
+
 p.write_text(m)
 
-# Audit final generated beta21 source.
+
+# -----------------------------------------------------------------------------
+# Final audit. No hidden developer shortcuts are added here.
+# -----------------------------------------------------------------------------
 gui=Path('source/gui_console.cpp').read_text()
-stress=Path('source/stress_tests.cpp').read_text()
 main=Path('source/main_oc.cpp').read_text()
+stress=Path('source/stress_tests.cpp').read_text()
 card_start=gui.find('void drawInstructionCard()')
-card_end=gui.find('\n}\n',card_start)+3
+card_end=gui.find('\n}',card_start)+2
 card=gui[card_start:card_end]
 checks={
-    'task card has no duplicate action button':'instructionLine2' not in card and 'y + 126' not in card,
-    'developer pass shortcut':'HidNpadButton_ZL | HidNpadButton_ZR' in stress and 'HidNpadButton_Plus' in stress and 'developerForcePass' in stress,
-    'developer fail shortcut':'HidNpadButton_Minus' in stress and 'developerForceFail' in stress,
-    'shortcuts hidden from normal UI':'Force PASS' not in gui and 'Force FAIL' not in gui,
-    'simple RAM timing copy':'So far, the Wizard used standard RAM timings.' in main,
-    'stage-specific timing values':'v.valueCount=8' in main and '"tREFI"' in main,
+    'task card instruction only':'instructionLine2' not in card and 'drawActionButton' not in card and 'y + 126' not in card,
+    'DVB left says next candidate':'Next DVB Candidate to Test' in main,
+    'DVB right says apply and reboot':'Continue to apply DVB Shift ' in main and ' and reboot' in main,
+    'sweep result page retained':'Errors detected at ' in main and 'Max clock candidate for now' in main,
+    'true stress result captured':'g_lastStressOutcome=r.outcome' in main and 'g_lastStressDetail=r.detail' in main,
+    'cancel not classified as fail':'g_lastStressOutcome==stress::Outcome::Cancelled' in main and 'was cancelled' in main,
+    'technical abort not classified as fail':'This candidate was not evaluated' in main,
+    'all-test override cleanup scope':'struct OverrideCleanupScope' in main and 'OverrideCleanupScope overrideCleanup' in main,
+    'RAM candidate cleanup scope':'clear CPU/GPU/RAM temporary overrides after runRamCandidate' in main,
+    '60 second RAM stability retained':'runStress(stress::Kind::Ram,60,"RAM Clock Stability - "' in main,
+    'DVB8 retained':'Common / HP off / DVB8 / 66MHz Step Mode' in main,
+    'charger guard retained':'waitForChargerRetry' in main,
+    'audio reminder retained':'attention::tick(false)' in main,
+    'no developer forced pass':'developerForcePass' not in stress,
+    'no developer forced fail':'developerForceFail' not in stress,
 }
-for n,o in checks.items():
-    print(('PASS ' if o else 'FAIL ')+n)
+for name,ok in checks.items():
+    print(('PASS ' if ok else 'FAIL ')+name)
 bad=[n for n,o in checks.items() if not o]
 if bad:
-    raise SystemExit('Beta21 fix audit failed: '+', '.join(bad))
+    raise SystemExit('Beta21 final fix audit failed: '+', '.join(bad))
