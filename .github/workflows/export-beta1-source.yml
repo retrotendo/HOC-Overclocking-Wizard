@@ -1,0 +1,26 @@
+name: Export beta1 source
+on:
+  push:
+    branches: [oc-wizard-beta1]
+    paths:
+      - '.github/workflows/export-beta1-source.yml'
+  workflow_dispatch:
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: oc-wizard-beta1
+      - name: Pack source tree
+        run: |
+          tar -czf hoc-oc-beta1-source.tar.gz \
+            --exclude=.git \
+            --exclude=hoc-oc-beta1-source.tar.gz \
+            .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hoc-oc-beta1-source
+          path: hoc-oc-beta1-source.tar.gz
+          if-no-files-found: error
