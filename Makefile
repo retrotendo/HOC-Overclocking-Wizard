@@ -17,7 +17,7 @@ ROMFS       := romfs
 
 APP_TITLE   := HOC Overclocking Wizard
 APP_AUTHOR  := Retrotendo / Community
-APP_VERSION := 0.1.0-beta.2
+APP_VERSION := 0.1.0-beta.3
 
 ARCH        := -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
 CFLAGS      := -g -Wall -O2 -ffunction-sections $(ARCH) $(DEFINES) `curl-config --cflags`
