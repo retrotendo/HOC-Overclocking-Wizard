@@ -30,9 +30,7 @@ struct RamResult {
 
 struct GpuResult {
     bool ok = false;
-    double gflops = 0.0;
-    std::uint64_t dispatches = 0;
-    std::uint64_t mismatches = 0;
+    double fps = 0.0;
     Telemetry telemetry;
     std::string error;
 };
@@ -45,7 +43,7 @@ struct CpuResult {
 };
 
 RamResult runRam();
-GpuResult runGpu(int windows = 8);
+GpuResult runGpu(int seconds = 7);
 CpuResult runCpu(int seconds = 7);
 
 } // namespace ocbench
