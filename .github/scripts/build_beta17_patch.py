@@ -82,7 +82,7 @@ m=replace_function(m,'bool setRamOverrides(u32 cpu,u32 gpu,u32 ram,std::string& 
     err=b; return false;
 }''')
 
-# Side card policy: CONFIG-selected values only. No live clock/voltage telemetry here.
+# Side card policy: CONFIG-selected values only. No live clock/voltage telemetry for stored HOC values.
 setpos=m.find('    auto setValue=[&](int i,const char* label,const std::string& value)')
 printpos=m.find('    auto print=[&](int row,const std::string&s)', setpos)
 if setpos < 0 or printpos < 0: raise SystemExit('render side-card block missing')
@@ -133,11 +133,14 @@ p.write_text(m)
 main=Path('source/main_oc.cpp').read_text(); cfg=Path('source/oc_config.cpp').read_text(); hdr=Path('source/oc_config.hpp').read_text()
 checks={
  'beta17 version':'0.1.0-beta.17' in Path('Makefile').read_text(),
- 'DVB prep 8':'int dvbGood = 8' in main and 'int expectedDvb=8' in main and 'DVB Shift 8' in main,
+ 'DVB state starts 8':'int dvbGood = 8' in main and 'int dvbCandidate = 7' in main,
+ 'DVB guard expects 8':'int expectedDvb=8' in main,
+ 'DVB prep text 8':('DVB Shift 8' in main or 'DVB 8  |' in main),
+ 'no prep DVB5 assignments':'d.dvbShift=5;' not in main and 'g.dvbGood=5;g.dvbCandidate=4;' not in main,
  'RAM stability 60s':'runStress(stress::Kind::Ram,60,"RAM Clock Stability - "' in main,
  'RAM settle polling':"for(int i=0;i<50;++i)" in main and "Override %u.%03u MHz" in main,
  'RAM only verification':'clockMatch(c.overrideHz[2],ram)' in main and 'clockMatch(c.realHz[2],ram)' in main,
- 'config side card no live clocks':'setValue(0,"RAM Max Clock"' in main and 'setValue(0,"CPU Max Clock"' in main and 'setValue(0,"GPU UV Table"' in main,
+ 'config side cards':'setValue(0,"RAM Max Clock"' in main and 'setValue(0,"CPU Max Clock"' in main and 'setValue(0,"GPU UV Table"' in main,
  'GPU config getter':'getGpuTuning' in hdr and 'bool getGpuTuning' in cfg,
  'exact VDD formatting':'fmtMvUv(int(rc.vdd2Uv))' in main and 'fmtMvUv(int(rc.vddqUv))' in main,
  'visible benchmark retained':'RAM Memory Benchmark' in Path('source/oc_bench.cpp').read_text(),
