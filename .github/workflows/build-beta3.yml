@@ -19,16 +19,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Apply beta3 patch
-        run: python3 tools/patch_beta3.py
-
       - name: Build
         run: make -j2
 
       - name: Upload beta3 package
         uses: actions/upload-artifact@v4
         with:
-          name: HOC-Overclocking-Wizard-beta3
+          name: HOC-Overclocking-Wizard-beta3-clean
           path: |
             HOC-Overclocking-Wizard.nro
             source/updater.cpp
