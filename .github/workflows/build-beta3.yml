@@ -21,15 +21,18 @@ jobs:
 
       - name: Apply beta3 patch
         run: |
+          cd "$GITHUB_WORKSPACE"
           python3 tools/patch_beta3.py
-          git config user.name "retrotendo"
-          git config user.email "info@retrotendo.de"
-          git add source/updater.cpp Makefile RELEASE_NOTES_v0.1.0-beta.3.md
-          git commit -m "Fix startup updater socket lifecycle for beta3"
-          git push
+          git -C "$GITHUB_WORKSPACE" config user.name "retrotendo"
+          git -C "$GITHUB_WORKSPACE" config user.email "info@retrotendo.de"
+          git -C "$GITHUB_WORKSPACE" add source/updater.cpp Makefile RELEASE_NOTES_v0.1.0-beta.3.md
+          git -C "$GITHUB_WORKSPACE" commit -m "Fix startup updater socket lifecycle for beta3"
+          git -C "$GITHUB_WORKSPACE" push
 
       - name: Build
-        run: make -j2
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          make -j2
 
       - name: Upload NRO
         uses: actions/upload-artifact@v4
