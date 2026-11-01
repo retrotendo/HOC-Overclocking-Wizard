@@ -50,11 +50,10 @@ export NROFLAGS += --romfsdir=$(CURDIR)/$(ROMFS)
 
 CFILES   := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
 CPPFILES := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp)))
-# beta52 main remains in the tree as a reference but is not linked into the OC app.
-# The copied experimental gpu_bench.cpp used a second embedded shader pipeline;
-# beta1 instead measures GPU FPS with Benchmark Toolbox Furmark and uses the
-# existing deko3d verifier for stability.
-CPPFILES := $(filter-out main.cpp gpu_bench.cpp,$(CPPFILES))
+# Keep beta52 main only as a reference. The OC app links main_oc.cpp.
+# Benchmark Toolbox is intentionally reduced to GPU Furmark + CPU Ray Trace;
+# unrelated scenes/resources are not linked into the Wizard.
+CPPFILES := $(filter-out main.cpp gpu_bench.cpp BHRT.cpp CPURB.cpp GPUPT.cpp fmrkRAM.cpp,$(CPPFILES))
 SFILES   := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.s)))
 BINFILES := $(foreach dir,$(DATA),$(notdir $(wildcard $(dir)/*.*)))
 
@@ -97,8 +96,7 @@ $(OUTPUT).nro : $(OUTPUT).elf
 endif
 $(OUTPUT).elf : $(OFILES)
 
-# Benchmark Toolbox embeds its binary/png resources as generated headers.
-# Ensure every source object waits until bin2o has generated those headers.
+# Benchmark Toolbox embeds its PNG resources as generated headers.
 $(OFILES_SRC): $(HFILES_BIN)
 
 %.bin.o %_bin.h : %.bin
