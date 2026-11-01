@@ -1,0 +1,32 @@
+name: Import pinned Benchmark Toolbox assets
+on:
+  push:
+    branches: [oc-wizard-beta1]
+    paths:
+      - '.github/workflows/import-benchmark-assets.yml'
+permissions:
+  contents: write
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: oc-wizard-beta1
+      - name: Import only assets required by GPU Furmark
+        run: |
+          set -eux
+          mkdir -p data
+          base='https://raw.githubusercontent.com/Horizon-OC/Horizon-OC/d7c9ad8515abf8513e0e52d47fb769e3b18322db/Source/Benchmark-Toolbox/data'
+          curl -L --fail -o data/fur.png "$base/fur.png"
+          curl -L --fail -o data/noise.png "$base/noise.png"
+          curl -L --fail -o data/wall.png "$base/wall.png"
+          test -s data/fur.png
+          test -s data/noise.png
+          test -s data/wall.png
+          rm -f .github/workflows/import-benchmark-assets.yml
+          git config user.name retrotendo
+          git config user.email info@retrotendo.de
+          git add -A
+          git commit -m 'Import pinned Benchmark Toolbox Furmark assets'
+          git push origin HEAD:oc-wizard-beta1
