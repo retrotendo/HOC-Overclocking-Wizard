@@ -27,7 +27,7 @@ constexpr const char* UPDATE_MANIFEST =
 constexpr const char* NRO_ASSET = "HOC-Overclocking-Wizard.nro";
 constexpr const char* SHA_ASSET = "HOC-Overclocking-Wizard.nro.sha256";
 constexpr const char* DEFAULT_SELF =
-    "sdmc:/switch/HOC-Undervolting-Wizard/HOC-Overclocking-Wizard.nro";
+    "sdmc:/switch/HOC-Overclocking-Wizard/HOC-Overclocking-Wizard.nro";
 constexpr const char* USER_AGENT = "HOC-Overclocking-Wizard-Updater/1.0";
 
 struct SemVersion {
