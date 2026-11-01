@@ -65,7 +65,7 @@ jobs:
         run: python3 .github/scripts/build_beta20_fix.py
       - name: Apply beta21 RAM sweep result and UX cleanup
         run: python3 .github/scripts/build_beta21_patch.py
-      - name: Apply beta21 task-card and temporary developer-test fixes
+      - name: Apply beta21 final task-card and override cleanup fixes
         run: python3 .github/scripts/build_beta21_fix.py
 
       - name: Build NRO
@@ -82,13 +82,13 @@ jobs:
           make_latest: false
           body: |
             Beta 21 improves RAM sweep safety and user-facing clarity.
-            - Temporary CPU/GPU/RAM overrides are cleared after every RAM candidate test, whether it passes or fails.
-            - The RAM sweep now ends on a clear result page showing the failed MHz and the last stable/max-clock candidate.
-            - RAM tuning pages now use simple user language: left explains what is being done, right says what the user must do next.
-            - ACTUAL ACTIVE VALUES is stage-specific: timings on timing pages, DVB on DVB, HP on HP, and the matching rail on voltage pages.
-            - DVB shows the next candidate explicitly and tells the user when Continue will apply it and reboot.
-            - The right YOUR TASK card is instruction-only; duplicate action buttons are removed globally.
-            - Beta20 audio reminders, charger guard, benchmark UI and all prior tuning logic remain intact.
+            - The RAM Max Clock sweep ends on a clear result page showing the failed MHz and the last stable / current max-clock candidate.
+            - A cancelled or technically interrupted candidate is not reported as a RAM stability failure and does not establish the max-clock limit.
+            - Temporary CPU/GPU/RAM overrides are cleared whenever a tuning test step exits; the next test applies its required overrides again.
+            - DVB clearly shows the next candidate on the left and tells the user when Continue will apply that DVB Shift and reboot.
+            - The right YOUR TASK card is instruction-only; duplicate action buttons are removed globally because the actual buttons already exist on the left.
+            - ACTUAL ACTIVE VALUES remains stage-specific and config-based.
+            - Beta20 audio reminders, charger guard, RUNNING animation, visible benchmark UI, DVB 8 baseline, exact config values and 60-second RAM stability are retained.
           files: |
             HOC-Overclocking-Wizard.nro
             HOC-Overclocking-Wizard.nro.sha256
