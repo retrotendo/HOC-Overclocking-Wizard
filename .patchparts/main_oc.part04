@@ -1,0 +1,83 @@
+mendedMHz)+" MHz")){g.vdd2GoodUv=g.vdd2CandidateUv;g.vdd2CandidateUv-=12500;g.vdd2Applied=0;saveState();}else{if(!occonfig::setVdd2Uv(g.vdd2GoodUv,e)){modalError(e);return;}g.vdd2Applied=0;saveState();requestReboot(Stage::RamVddq);}}
++void finishGpuPoint(){
++    int f=GPU_FREQS[g.gpuIndex];std::string e;if(!setOverrides(CPU_BASE_HZ,u32(f)*1000000U,RAM_BASE_HZ,e)){modalError(e);return;}auto b=ocbench::runGpu(7);if(!b.ok){modalError(b.error);return;}
++    oc::SweepPoint p;p.domain=oc::Domain::Gpu;p.requestedMHz=f;p.realMHz=b.telemetry.realGpuMHz;p.railMv=g.gpuGoodMv;p.performance=b.fps;p.batteryPowerW=b.telemetry.batteryPowerW;p.powerReliable=false;p.stable=true;p.context="Base RAM intrinsic GPU curve";recordPoint(gpuPoints,p);
++    ++g.gpuIndex;g.gpuGoodMv=800;g.gpuCandidateMv=790;g.gpuApplied=0;if(g.gpuIndex>=int(sizeof(GPU_FREQS)/sizeof(GPU_FREQS[0]))){analyzeGpu();g.stage=Stage::GpuGraph;}saveState();
++}
+ 
+-void runVddq(){std::string e;if(!g.vddqApplied){if(g.vddqCandidateMv<VDDQ_MIN_MV){g.stage=Stage::RamSoc;saveState();return;}if(!occonfig::setVddq(g.vddqCandidateMv,e)){modalError(e);return;}g.vddqApplied=1;saveState();requestReboot(Stage::RamVddq);return;}if(!setOverrides(CPU_BASE_HZ,GPU_BASE_HZ,u32(g.ramRecommendedMHz)*1000000U,e)){modalError(e);return;}if(runStress(stress::Kind::Ram,60,"VDDQ Stability","RAM "+std::to_string(g.ramRecommendedMHz)+" MHz")){g.vddqGoodMv=g.vddqCandidateMv;g.vddqCandidateMv-=10;g.vddqApplied=0;saveState();}else{if(!occonfig::setVddq(g.vddqGoodMv,e)){modalError(e);return;}g.vddqApplied=0;saveState();requestReboot(Stage::RamSoc);}}
++void runGpuTune(){
++    if(g.gpuIndex>=int(sizeof(GPU_FREQS)/sizeof(GPU_FREQS[0]))){analyzeGpu();g.stage=Stage::GpuGraph;saveState();return;}
++    int f=GPU_FREQS[g.gpuIndex];std::string e;
++    // state 2 means a failed/aborted candidate was restored and rebooted; now
++    // benchmark the actual last-good point before advancing to the next clock.
++    if(g.gpuApplied==2){finishGpuPoint();return;}
++    if(g.gpuApplied==0){if(g.gpuCandidateMv<GPU_MIN_MV){finishGpuPoint();return;}if(!occonfig::setGpuPoint(f,g.gpuCandidateMv,e)){modalError(e);return;}g.gpuApplied=1;saveState();requestReboot(Stage::GpuTune);return;}
++    if(!setOverrides(CPU_BASE_HZ,u32(f)*1000000U,RAM_BASE_HZ,e)){modalError(e);return;}
++    bool pass=runStress(stress::Kind::Gpu,45,"GPU Voltage Stability","GPU "+std::to_string(f)+" MHz @ "+std::to_string(g.gpuCandidateMv)+" mV");
++    if(pass){g.gpuGoodMv=g.gpuCandidateMv;g.gpuCandidateMv-=5;g.gpuApplied=0;saveState();}
++    else{if(!occonfig::setGpuPoint(f,g.gpuGoodMv,e)){modalError(e);return;}g.gpuApplied=2;saveState();requestReboot(Stage::GpuTune);}
++}
+ 
+-void initSoc(){if(g.socGoodMv>0)return;std::string e;if(!setOverrides(CPU_BASE_HZ,GPU_BASE_HZ,u32(g.ramRecommendedMHz)*1000000U,e)){modalError(e);return;}HocMonClocks c{};hocmonGetTelemetry(&c);g.socTableMHz=nearestSocFreq(g.ramRecommendedMHz);g.socGoodMv=int(std::round(c.socVoltageUv/1000.0));if(g.socGoodMv<637)g.socGoodMv=875;g.socCandidateMv=nextLowerSocMv(g.socGoodMv);saveState();}
+-void runSoc(){initSoc();if(g_errorModal)return;std::string e;if(!g.socApplied){if(g.socCandidateMv<637||g.socCandidateMv<=0){g.stage=Stage::RamFinalGraph;saveState();return;}if(!occonfig::setSocPoint(g.socTableMHz,g.socCandidateMv,e)){modalError(e);return;}g.socApplied=1;saveState();requestReboot(Stage::RamSoc);return;}if(!setOverrides(CPU_BASE_HZ,GPU_BASE_HZ,u32(g.ramRecommendedMHz)*1000000U,e)){modalError(e);return;}if(runStress(stress::Kind::Ram,60,"SoC Voltage Stability","RAM "+std::to_string(g.ramRecommendedMHz)+" MHz")){g.socGoodMv=g.socCandidateMv;g.socCandidateMv=nextLowerSocMv(g.socGoodMv);g.socApplied=0;saveState();}else{if(!occonfig::setSocPoint(g.socTableMHz,g.socGoodMv,e)){modalError(e);return;}g.socApplied=0;saveState();requestReboot(Stage::RamFinalGraph);}}
++void runGpuRam(){
++    std::string e;int gpuMv=0;if(!occonfig::getGpuPoint(g.gpuRecommendedMHz,gpuMv,e)){modalError(e);return;}
++    if(!setOverrides(CPU_BASE_HZ,u32(g.gpuRecommendedMHz)*1000000U,u32(g.ramRecommendedMHz)*1000000U,e)){modalError(e);return;}
++    bool pass=runStress(stress::Kind::Gpu,90,"GPU + RAM Integration","GPU "+std::to_string(g.gpuRecommendedMHz)+" | RAM "+std::to_string(g.ramRecommendedMHz));
++    if(pass){g.gpuRamTrial=0;g.stage=Stage::CpuPreparation;saveState();return;}
+ 
+-void finishGpuPoint(){int f=GPU_FREQS[g.gpuIndex];oc::SweepPoint p;p.domain=oc::Domain::Gpu;p.requestedMHz=f;p.realMHz=f;p.railMv=g.gpuGoodMv;p.performance=g.gpuLastPerfMilli/1000.0;p.batteryPowerW=g.gpuLastPowerMilli/1000.0;p.powerReliable=g.gpuLastPowerMilli>0;p.stable=true;recordPoint(gpuPoints,p);++g.gpuIndex;g.gpuHaveBaseline=0;g.gpuApplied=0;g.gpuGoodMv=g.gpuCandidateMv=0;g.gpuLastPerfMilli=g.gpuLastPowerMilli=0;if(g.gpuIndex>=int(sizeof(GPU_FREQS)/sizeof(GPU_FREQS[0]))){analyzeGpu();g.stage=Stage::GpuGraph;}saveState();}
++    if(g.gpuRamTrial==0){g.gpuRamOriginalRam=g.ramRecommendedMHz;g.gpuRamOriginalGpu=g.gpuRecommendedMHz;g.gpuRamOriginalMv=gpuMv;g.gpuRamOriginalSoc=g.socGoodMv;g.gpuRamOriginalVdd2Uv=g.vdd2GoodUv;if(!occonfig::setGpuPoint(g.gpuRecommendedMHz,std::min(800,gpuMv+10),e)){modalError(e);return;}g.gpuRamTrial=1;saveState();requestReboot(Stage::GpuRamCombined);return;}
++    if(g.gpuRamTrial==1){if(!occonfig::setGpuPoint(g.gpuRamOriginalGpu,g.gpuRamOriginalMv,e)){modalError(e);return;}int up=nextHigherSocMv(g.gpuRamOriginalSoc);if(up>0&&occonfig::setSocPoint(g.socTableMHz,up,e)){g.socGoodMv=up;g.gpuRamTrial=2;saveState();requestReboot(Stage::GpuRamCombined);return;}}
++    if(g.gpuRamTrial==2){if(!occonfig::setSocPoint(g.socTableMHz,g.gpuRamOriginalSoc,e)){modalError(e);return;}g.socGoodMv=g.gpuRamOriginalSoc;if(!occonfig::setVdd2Uv(g.gpuRamOriginalVdd2Uv+12500,e)){modalError(e);return;}g.vdd2GoodUv=g.gpuRamOriginalVdd2Uv+12500;g.gpuRamTrial=3;saveState();requestReboot(Stage::GpuRamCombined);return;}
++    if(g.gpuRamTrial==3){if(!occonfig::setVdd2Uv(g.gpuRamOriginalVdd2Uv,e)){modalError(e);return;}g.vdd2GoodUv=g.gpuRamOriginalVdd2Uv;int lower=previousPointMHz(ramPoints,g.gpuRamOriginalRam);if(lower>0){g.ramRecommendedMHz=lower;g.gpuRamTrial=4;saveState();return;}}
++    if(g.gpuRamTrial==4){g.ramRecommendedMHz=g.gpuRamOriginalRam;int lower=previousPointMHz(gpuPoints,g.gpuRamOriginalGpu);if(lower>0){g.gpuRecommendedMHz=lower;g.gpuRamTrial=5;saveState();return;}}
++    modalError("GPU + RAM remains unstable after isolated GPU, SoC, VDD2, RAM and GPU-clock checks. Review the measured curves before continuing.");
++}
+ 
+-void runGpuTune(){if(g.gpuIndex>=int(sizeof(GPU_FREQS)/sizeof(GPU_FREQS[0]))){analyzeGpu();g.stage=Stage::GpuGraph;saveState();return;}int f=GPU_FREQS[g.gpuIndex];std::string e;if(!g.gpuHaveBaseline){if(!setOverrides(CPU_BASE_HZ,u32(f)*1000000U,RAM_BASE_HZ,e)){modalError(e);return;}auto b=ocbench::runGpu();if(!b.ok){modalError(b.error);return;}g.gpuGoodMv=int(std::round(b.telemetry.gpuMv/5.0)*5.0);if(g.gpuGoodMv<GPU_MIN_MV)g.gpuGoodMv=700;g.gpuCandidateMv=g.gpuGoodMv-10;g.gpuLastPerfMilli=int(std::round(b.gflops*1000.0));g.gpuLastPowerMilli=int(std::round(b.telemetry.batteryPowerW*1000.0));g.gpuHaveBaseline=1;saveState();return;}if(!g.gpuApplied){if(g.gpuCandidateMv<GPU_MIN_MV){finishGpuPoint();return;}if(!occonfig::setGpuPoint(f,g.gpuCandidateMv,e)){modalError(e);return;}g.gpuApplied=1;saveState();requestReboot(Stage::GpuTune);return;}if(!setOverrides(CPU_BASE_HZ,u32(f)*1000000U,RAM_BASE_HZ,e)){modalError(e);return;}bool pass=runStress(stress::Kind::Gpu,60,"GPU Voltage Stability","GPU "+std::to_string(f)+" MHz @ "+std::to_string(g.gpuCandidateMv)+" mV");auto b=pass?ocbench::runGpu():ocbench::GpuResult{};if(pass&&b.ok){g.gpuGoodMv=g.gpuCandidateMv;g.gpuCandidateMv-=5;g.gpuLastPerfMilli=int(std::round(b.gflops*1000.0));g.gpuLastPowerMilli=int(std::round(b.telemetry.batteryPowerW*1000.0));g.gpuApplied=0;saveState();}else{if(!occonfig::setGpuPoint(f,g.gpuGoodMv,e)){modalError(e);return;}g.gpuApplied=0;finishGpuPoint();requestReboot(g.stage);}}
++bool prepareCpu(){
++    std::string e;if(!occonfig::setCpuTuning(0,5,3,620,870,CPU_VMAX_SAFE,CPU_SAFE_MAX_MHZ,e)){modalError(e);return false;}
++    g.cpuPrepApplied=1;g.cpuIndex=0;g.highUvGood=5;g.highUvCandidate=6;g.highUvApplied=0;g.lowUvGood=0;g.lowUvCandidate=1;g.lowVminCandidate=610;g.highVminGood=870;g.highVminCandidate=850;g.vmaxGood=CPU_VMAX_SAFE;g.vmaxCandidate=0;saveState();return requestReboot(Stage::CpuSweep);
++}
+ 
+-int previousPointMHz(const std::vector<oc::SweepPoint>& pts,int current){int prev=0;for(auto&p:pts)if(int(p.requestedMHz)<current)prev=std::max(prev,int(p.requestedMHz));return prev;}
++void finishCpuCapability(){
++    analyzeCpu();if(g.cpuStableMaxMHz<=0){modalError("No stable High CPU point was measured.");return;}g.highUvGood=5;g.highUvCandidate=6;g.highUvApplied=0;g.stage=Stage::CpuHighUv;saveState();
++}
+ 
+-void runGpuRam(){std::string e;if(!setOverrides(CPU_BASE_HZ,u32(g.gpuRecommendedMHz)*1000000U,u32(g.ramRecommendedMHz)*1000000U,e)){modalError(e);return;}bool pass=runStress(stress::Kind::Ram,60,"GPU + RAM Integration","GPU "+std::to_string(g.gpuRecommendedMHz)+" | RAM "+std::to_string(g.ramRecommendedMHz));auto b=pass?ocbench::runGpu():ocbench::GpuResult{};pass=pass&&b.ok;if(pass){if(g.gpuRamTrial==1||g.gpuRamTrial==2){g.gpuRamTrial=0;}g.stage=Stage::CpuHighUv;saveState();return;}if(g.gpuRamTrial==0){g.gpuRamOriginalRam=g.ramRecommendedMHz;g.gpuRamOriginalGpu=g.gpuRecommendedMHz;int lower=previousPointMHz(ramPoints,g.ramRecommendedMHz);if(lower>0){g.ramRecommendedMHz=lower;g.gpuRamTrial=1;saveState();return;}}if(g.gpuRamTrial==1){g.ramRecommendedMHz=g.gpuRamOriginalRam;int lower=previousPointMHz(gpuPoints,g.gpuRecommendedMHz);if(lower>0){g.gpuRecommendedMHz=lower;g.gpuRamTrial=2;saveState();return;}}modalError("GPU + RAM remains unstable after single-domain backoff. Review the RAM/GPU curves before continuing.");}
++void runCpuCapability(){
++    if(g.cpuIndex>=int(sizeof(CPU_FREQS)/sizeof(CPU_FREQS[0]))){finishCpuCapability();return;}int f=CPU_FREQS[g.cpuIndex];if(f>CPU_SAFE_MAX_MHZ){finishCpuCapability();return;}std::string e;
++    if(!guardCpuConfig(0,5,3,620,870,CPU_VMAX_SAFE,CPU_SAFE_MAX_MHZ,"CPU capability test"))return;
++    if(!setOverrides(u32(f)*1000000U,GPU_BASE_HZ,u32(g.ramRecommendedMHz)*1000000U,e)){finishCpuCapability();return;}
++    if(!runStress(stress::Kind::Combined,60,"CPU Capability Stability","CPU "+std::to_string(f)+" MHz + RAM "+std::to_string(g.ramRecommendedMHz))){finishCpuCapability();return;}
++    auto b=ocbench::runCpu(7);if(!b.ok||std::abs(b.telemetry.realCpuMHz-f)>5.0){finishCpuCapability();return;}
++    oc::SweepPoint p;p.domain=oc::Domain::Cpu;p.requestedMHz=f;p.realMHz=b.telemetry.realCpuMHz;p.railMv=std::uint32_t(std::round(b.telemetry.cpuMv));p.performance=b.fps;p.batteryPowerW=b.telemetry.batteryPowerW;p.powerReliable=false;p.stable=true;p.context="Conservative CPU capability sweep + final RAM";recordPoint(cpuPoints,p);g.cpuStableMaxMHz=f;if(++g.cpuIndex>=int(sizeof(CPU_FREQS)/sizeof(CPU_FREQS[0])))finishCpuCapability();else saveState();
++}
+ 
+-void runHighUv(){std::string e;if(!g.highUvApplied){if(g.highUvCandidate>13){g.stage=Stage::CpuSweep;saveState();return;}if(!occonfig::setCpuTuning(0,g.highUvCandidate,3,620,750,1200,2397,e)){modalError(e);return;}g.highUvApplied=1;saveState();requestReboot(Stage::CpuHighUv);return;}if(!setOverrides(2397000000U,GPU_BASE_HZ,u32(g.ramRecommendedMHz)*1000000U,e)){modalError(e);return;}bool pass=runStress(stress::Kind::Combined,60,"CPU High UV Stability","2397 MHz + final RAM");auto b=pass?ocbench::runCpu(6):ocbench::CpuResult{};if(pass&&b.ok){g.highUvGood=g.highUvCandidate;++g.highUvCandidate;g.highUvApplied=0;saveState();}else{if(!occonfig::setCpuTuning(0,g.highUvGood,3,620,750,1200,2397,e)){modalError(e);return;}g.highUvApplied=0;g.stage=Stage::CpuSweep;saveState();requestReboot(Stage::CpuSweep);}}
++bool testHighUvCurve(){
++    std::string e;for(int f:CPU_FREQS){if(f>g.cpuStableMaxMHz)break;if(!setOverrides(u32(f)*1000000U,GPU_BASE_HZ,u32(g.ramRecommendedMHz)*1000000U,e)){return false;}if(!runStress(stress::Kind::Combined,30,"CPU High UV Screening","CPU "+std::to_string(f)+" MHz | High UV "+std::to_string(g.highUvCandidate)))return false;}return true;
++}
+ 
+-void finishCpuSweep(){analyzeCpu();if(g.cpuRecommendedMHz<=0){modalError("No stable CPU point was measured.");return;}g.stage=Stage::CpuTbreak2Set;saveState();}
+-void runCpuSweep(){int f=CPU_FREQS[g.cpuIndex];std::string e;if(!setOverrides(u32(f)*1000000U,GPU_BASE_HZ,u32(g.ramRecommendedMHz)*1000000U,e)){modalError(e);return;}if(!runStress(stress::Kind::Combined,60,"CPU Sweep Stability","CPU "+std::to_string(f)+" MHz + RAM "+std::to_string(g.ramRecommendedMHz))){finishCpuSweep();return;}auto b=ocbench::runCpu(6);if(!b.ok){finishCpuSweep();return;}oc::SweepPoint p;p.domain=oc::Domain::Cpu;p.requestedMHz=f;p.realMHz=b.telemetry.realCpuMHz;p.railMv=std::uint32_t(std::round(b.telemetry.cpuMv));p.performance=b.fps;p.batteryPowerW=b.telemetry.batteryPowerW;p.powerReliable=b.telemetry.powerSamples>1;p.stable=true;recordPoint(cpuPoints,p);g.cpuStableMaxMHz=f;if(++g.cpuIndex>=int(sizeof(CPU_FREQS)/sizeof(CPU_FREQS[0])))finishCpuSweep();else saveState();}
++void runHighUv(){
++    std::string e;if(!g.highUvApplied){if(g.highUvCandidate>12){g.stage=Stage::CpuLowUv;saveState();return;}if(!occonfig::setCpuTuning(0,g.highUvCandidate,3,620,870,CPU_VMAX_SAFE,g.cpuStableMaxMHz,e)){modalError(e);return;}g.highUvApplied=1;saveState();requestReboot(Stage::CpuHighUv);return;}
++    if(testHighUvCurve()){g.highUvGood=g.highUvCandidate;++g.highUvCandidate;g.highUvApplied=0;saveState();}
++    else{if(!occonfig::setCpuTuning(0,g.highUvGood,3,620,870,CPU_VMAX_SAFE,g.cpuStableMaxMHz,e)){modalError(e);return;}g.highUvApplied=0;g.lowUvGood=0;g.lowUvCandidate=1;saveState();requestReboot(Stage::CpuLowUv);}
++}
+ 
+-bool tbreakBoundaryCost(int&out){std::string e;double sum=0;for(int f:{1581,1683}){if(!setOverrides(u32(f)*1000000U,GPU_BASE_HZ,u32(g.ramRecommendedMHz)*1000000U,e)){modalError(e);return false;}if(!runStress(stress::Kind::Cpu,30,"CPU TBreak Boundary","CPU "+std::to_string(f)+" MHz"))return false;auto b=ocbench::runCpu(5);if(!b.ok)return false;sum+=b.telemetry.cpuMv;}out=int(std::round(sum/2.0));return true;}
++bool testLowPair(int uv,int vmin,int&cost){
++    std::string e;cost=0;for(int f:{1020,1428}){if(!setOverrides(u32(f)*1000000U,GPU_BASE_HZ,u32(g.ramRecommendedMHz)*1000000U,e))return false;if(!runStress(stress::Kind::Combined,60,"CPU Low Curve Stability","CPU "+std::to_string(f)+" MHz | UV "+std::to_string(uv)+" / "+std::to_string(vmin)+" mV"))return false;HocMonClocks c{};if(R_FAILED(hocmonGetTelemetry(&c)))return false;cost+=int(std::round(c.cpuVoltageUv/1000.0));}return true;
++}
+ 
+-void runCpuRam(){std::string e;if(!setOverrides(u32(g.cpuRecommendedMHz)*1000000U,GPU_BASE_HZ,u32(g.ramRecommendedMHz)*1000000U,e)){modalError(e);return;}bool pass=runStress(stress::Kind::Combined,300,"CPU + RAM Final Validation","CPU "+std::to_string(g.cpuRecommendedMHz)+" | RAM "+std::to_string(g.ramRecommendedMHz));if(pass){g.cpuRamTrial=0;g.stage=Stage::Finalize;saveState();return;}if(g.cpuRamTrial==0){g.cpuRamOriginalRam=g.ramRecommendedMHz;g.cpuRamOriginalCpu=g.cpuRecommendedMHz;int lower=previousPointMHz(ramPoints,g.ramRecommendedMHz);if(lower>0){g.ramRecommendedMHz=lower;g.cpuRamTrial=1;saveState();return;}}if(g.cpuRamTrial==1){g.ramRecommendedMHz=g.cpuRamOriginalRam;int lower=previousPointMHz(cpuPoints,g.cpuRecommendedMHz);if(lower>0){g.cpuRecommendedMHz=lower;g.cpuRamTrial=2;saveState();return;}}modalError("CPU + RAM remains unstable after single-domain backoff. Review the curves before continuing.");}
++void beginLowVmin(){
++    g.lowBestUv=g.lowUvGood;g.lowBestVmin=620;g.lowBestCostMv=g.lowLastCostMv>0?g.lowLastCostMv:99999;g.lowVminCandidate=610;g.lowVminApplied=0;g.stage=Stage::CpuLowVmin;saveState();
++}
+ 
+-void saveFinal(){ensureDir(PERF_OC_DIR);bool a=copyFile(HOC_CONFIG,(std::string(PERF_OC_DIR)+"/config.ini").c_str());bool b
