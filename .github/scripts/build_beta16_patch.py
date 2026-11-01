@@ -56,17 +56,12 @@ p.write_text(c)
 
 # Main guard/UI + robust sweep error handling.
 p=Path("source/main_oc.cpp"); m=p.read_text()
-# Preparation active-value row.
 needle='''row("RAM","Max Clock","3400 MHz",have?std::to_string(rc.ramMaxMHz)+" MHz":"unavailable",have&&rc.ramMaxMHz!=3400);'''
 replacement=needle+'\n                row("RAM","Step Mode","66 MHz",have?(rc.stepMode==0?"66 MHz":rc.stepMode==1?"100 MHz":rc.stepMode==2?"JEDEC":rc.stepMode==3?"133 MHz":rc.stepMode==4?"33 MHz":"unknown"):"unavailable",have&&rc.stepMode!=0);'
 m=must_replace(m,needle,replacement,"preparation step row")
-# Guard must compare config-selected Step Mode too.
 needle='''    if(rc.ramMaxMHz!=expectedMax) add("RAM Max "+std::to_string(rc.ramMaxMHz)+" != "+std::to_string(expectedMax)+" MHz");'''
 replacement=needle+'\n    if(rc.stepMode!=0) add("RAM Step Mode is not 66 MHz");'
 m=must_replace(m,needle,replacement,"guard step mode")
-# Replace runRamCandidate: config/override/benchmark problems are not silently classified as memory instability.
-old_start=m.find("void runRamCandidate()")
-if old_start<0: raise SystemExit("runRamCandidate missing")
 new_func=r'''void runRamCandidate(){
     if(g.ramSearchIndex<0||g.ramSearchIndex>g.ramSearchEndIndex){finishRamSweep();return;}
     const int freq=int(oc::RAM_STEPS_MHZ[g.ramSearchIndex]);std::string e;
@@ -84,20 +79,20 @@ new_func=r'''void runRamCandidate(){
     if(g.ramSearchIndex>=g.ramSearchEndIndex)finishRamSweep();else{++g.ramSearchIndex;saveState();}
 }'''
 m=replace_function(m,"void runRamCandidate()",new_func)
-# Preparation prose makes the imposed mode explicit.
 m=m.replace("Search controls: HP OFF  |  DVB Shift 5  |  SoC VMAX 1150 mV ceiling","Search controls: Step Mode 66 MHz  |  HP OFF  |  DVB 5  |  SoC VMAX 1150 mV")
 p.write_text(m)
 
 # Audit all important invariants.
 main=Path("source/main_oc.cpp").read_text(); cfg=Path("source/oc_config.cpp").read_text(); prof=Path("source/oc_profiles.hpp").read_text(); hdr=Path("source/oc_config.hpp").read_text()
+arr=prof[prof.index("static constexpr std::uint32_t RAM_STEPS_MHZ[] = {"):prof.index("};",prof.index("static constexpr std::uint32_t RAM_STEPS_MHZ[] = {"))+2]
 checks={
  "beta16 version":"0.1.0-beta.16" in Path("Makefile").read_text(),
  "step mode field":"stepMode" in hdr and "int uncapped, hp, memVolt, stepMode" in cfg,
  "step mode index current":"39,5,40,41,43,44,45,46,47,48" in cfg,
  "step mode forced 66":"v[i->stepMode]=0" in cfg,
  "guard checks 66":"RAM Step Mode is not 66 MHz" in main,
- "66MHz sweep contains 2200":"2066, 2133,\n    2200, 2266" in prof,
- "bad mixed 2300 removed":", 2300," not in prof,
+ "66MHz sweep contains 2200":"2066, 2133,\n    2200, 2266" in arr,
+ "bad mixed 2300 removed":", 2300," not in arr,
  "override failure not false fail":"This is not counted as a RAM stability failure" in main,
  "benchmark failure retry":"RAM point is not marked unstable" in main,
  "visible benchmark retained":"ocbench::runRam(\"RAM \"+std::to_string(freq)+\" MHz\")" in main,
