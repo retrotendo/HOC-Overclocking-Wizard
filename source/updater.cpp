@@ -581,7 +581,7 @@ void drawChecking() {
         return;
     }
     consoleClear();
-    std::printf("\x1b[1;1H\x1b[36mHOC Undervolting Wizard\x1b[0m\n");
+    std::printf("\x1b[1;1H\x1b[36mHOC Overclocking Wizard\x1b[0m\n");
     std::printf("------------------------------------------------------------\n\n");
     std::printf("Checking for updates...\n\n");
     std::printf("Installed: %s\n", HOC_WIZARD_VERSION);
@@ -602,7 +602,7 @@ void drawUpdatePrompt(const ReleaseInfo& release) {
         return;
     }
     consoleClear();
-    std::printf("\x1b[1;1H\x1b[36mHOC Undervolting Wizard - Update\x1b[0m\n");
+    std::printf("\x1b[1;1H\x1b[36mHOC Overclocking Wizard - Update\x1b[0m\n");
     std::printf("------------------------------------------------------------\n\n");
     std::printf("\x1b[32mA newer build is available.\x1b[0m\n\n");
     std::printf("Installed : %s\n", HOC_WIZARD_VERSION);
@@ -624,7 +624,7 @@ void drawInstalling(const ReleaseInfo& release) {
         return;
     }
     consoleClear();
-    std::printf("\x1b[1;1H\x1b[36mHOC Undervolting Wizard - Update\x1b[0m\n");
+    std::printf("\x1b[1;1H\x1b[36mHOC Overclocking Wizard - Update\x1b[0m\n");
     std::printf("------------------------------------------------------------\n\n");
     std::printf("Downloading %s...\n", release.version.c_str());
     std::printf("The existing NRO is not replaced until the new file\n");
@@ -683,7 +683,7 @@ void drawInstalled(const ReleaseInfo& release) {
         m.version = HOC_WIZARD_VERSION;
         m.eyebrow = "UPDATE INSTALLED";
         m.title = release.version + " is ready";
-        m.body = {"The previous NRO was kept as .bak.", "The running copy is still the old version in memory.", "Exit now and launch HOC Undervolting Wizard again."};
+        m.body = {"The previous NRO was kept as .bak.", "The running copy is still the old version in memory.", "Exit now and launch HOC Overclocking Wizard again."};
         m.primaryAction = "Exit";
         m.secondaryAction = "Exit";
         m.tone = gui::ModalTone::Green;
@@ -696,7 +696,7 @@ void drawInstalled(const ReleaseInfo& release) {
     std::printf("Installed new file: %s\n\n", release.version.c_str());
     std::printf("The previous NRO was kept as .bak.\n");
     std::printf("The running copy is still the old version in memory.\n\n");
-    std::printf("Exit now and launch HOC Undervolting Wizard again.\n\n");
+    std::printf("Exit now and launch HOC Overclocking Wizard again.\n\n");
     std::printf("[A] Exit   [B] Exit\n");
     consoleUpdate(nullptr);
 }
@@ -706,11 +706,9 @@ void drawInstalled(const ReleaseInfo& release) {
 bool startupCheckAndPrompt(PadState& pad, int argc, char** argv) {
     drawChecking();
 
-    const Result socketRc = socketInitializeDefault();
-    if (R_FAILED(socketRc)) return false;
-
+    // main() owns the libnx socket service. Re-initializing it here can fail
+    // immediately and skip the whole startup update flow before the UI is seen.
     if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) {
-        socketExit();
         return false;
     }
 
@@ -723,7 +721,6 @@ bool startupCheckAndPrompt(PadState& pad, int argc, char** argv) {
         if (status == CheckStatus::UpdateAvailable) break;
         if (status == CheckStatus::NoUpdate) {
             curl_global_cleanup();
-            socketExit();
             return false;
         }
 
@@ -735,14 +732,12 @@ bool startupCheckAndPrompt(PadState& pad, int argc, char** argv) {
             if (k & HidNpadButton_A) { retry = true; break; }
             if (k & HidNpadButton_B) {
                 curl_global_cleanup();
-                socketExit();
-                return false;
+                    return false;
             }
             svcSleepThread(20'000'000);
         }
         if (!retry) {
             curl_global_cleanup();
-            socketExit();
             return true;
         }
         drawChecking();
@@ -757,7 +752,6 @@ bool startupCheckAndPrompt(PadState& pad, int argc, char** argv) {
 
         if (k & HidNpadButton_B) {
             curl_global_cleanup();
-            socketExit();
             return false;
         }
 
@@ -767,8 +761,7 @@ bool startupCheckAndPrompt(PadState& pad, int argc, char** argv) {
                 error.clear();
                 if (installRelease(latest, selfPath, error)) {
                     curl_global_cleanup();
-                    socketExit();
-                    drawInstalled(latest);
+                            drawInstalled(latest);
                     while (appletMainLoop()) {
                         padUpdate(&pad);
                         const u64 exitKeys = padGetButtonsDown(&pad);
@@ -790,13 +783,11 @@ bool startupCheckAndPrompt(PadState& pad, int argc, char** argv) {
                 }
                 if (continueOld) {
                     curl_global_cleanup();
-                    socketExit();
-                    return false;
+                            return false;
                 }
                 if (!retry) {
                     curl_global_cleanup();
-                    socketExit();
-                    return true;
+                            return true;
                 }
             }
         }
@@ -805,7 +796,6 @@ bool startupCheckAndPrompt(PadState& pad, int argc, char** argv) {
     }
 
     curl_global_cleanup();
-    socketExit();
     return true;
 }
 
