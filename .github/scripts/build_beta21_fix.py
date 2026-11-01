@@ -28,8 +28,8 @@ p.write_text(s)
 # They are intentionally not shown anywhere in the normal UI.
 p=Path('source/stress_tests.cpp')
 t=p.read_text()
-old='''    bool cancelled = false;\n\n    while (true) {'''
-new='''    bool cancelled = false;\n    bool developerForcePass = false;\n    bool developerForceFail = false;\n\n    while (true) {'''
+old='''    bool cancelled = false;\n    bool powerLost = false;'''
+new='''    bool cancelled = false;\n    bool powerLost = false;\n    bool developerForcePass = false;\n    bool developerForceFail = false;'''
 if old not in t:
     raise SystemExit('beta21 stress state marker missing')
 t=t.replace(old,new,1)
@@ -40,14 +40,14 @@ if old not in t:
     raise SystemExit('beta21 stress input marker missing')
 t=t.replace(old,new,1)
 
-old='''    if (cancelled) {\n        out.outcome = Outcome::Cancelled;\n        out.detail = "Test cancelled by user.";\n    } else if (c.initError.load(std::memory_order_acquire) != 0) {'''
-new='''    if (developerForcePass) {\n        out.outcome = Outcome::Pass;\n        out.errors = 0;\n        out.mismatches = 0;\n        out.detail = "Developer shortcut: forced PASS.";\n    } else if (developerForceFail) {\n        out.outcome = Outcome::Fail;\n        out.errors = 1;\n        out.detail = "Developer shortcut: forced FAIL.";\n    } else if (cancelled) {\n        out.outcome = Outcome::Cancelled;\n        out.detail = "Test cancelled by user.";\n    } else if (c.initError.load(std::memory_order_acquire) != 0) {'''
+old='''    if (powerLost) {\n        out.outcome = Outcome::PowerLost;\n        out.detail = chargerError.empty() ? powerguard::kDisconnected : chargerError;\n    } else if (cancelled) {'''
+new='''    if (developerForcePass) {\n        out.outcome = Outcome::Pass;\n        out.errors = 0;\n        out.mismatches = 0;\n        out.detail = "Developer shortcut: forced PASS.";\n    } else if (developerForceFail) {\n        out.outcome = Outcome::Fail;\n        out.errors = 1;\n        out.detail = "Developer shortcut: forced FAIL.";\n    } else if (powerLost) {\n        out.outcome = Outcome::PowerLost;\n        out.detail = chargerError.empty() ? powerguard::kDisconnected : chargerError;\n    } else if (cancelled) {'''
 if old not in t:
     raise SystemExit('beta21 stress result marker missing')
 t=t.replace(old,new,1)
 p.write_text(t)
 
-# Remove a few remaining internal/developer explanations that do not help the user act.
+# Remove remaining internal/developer explanations that do not help the user act.
 p=Path('source/main_oc.cpp')
 m=p.read_text()
 replacements={
