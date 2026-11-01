@@ -1,0 +1,148 @@
+name: Patch OC Wizard beta2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/patch-beta2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout beta2 branch
+        uses: actions/checkout@v4
+        with:
+          ref: oc-wizard-beta2
+          fetch-depth: 0
+
+      - name: Apply beta2 UI and benchmark-condition fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('source/main_oc.cpp')
+          s = p.read_text()
+
+          old_values = '''    gui::View v;v.version=HOC_WIZARD_VERSION;v.activeStep=progressStep(g.stage);v.pulse=true;v.haveActiveValues=true;
+    v.values[0]={"CPU",fmt1(g_active.realHz[0]/1e6)+" MHz",false};v.values[1]={"GPU",fmt1(g_active.realHz[1]/1e6)+" MHz",false};v.values[2]={"RAM",fmt1(g_active.realHz[2]/1e6)+" MHz",false};v.values[3]={"VDD2",fmt1(g_active.vdd2VoltageUv/1000.0)+" mV",false};v.values[4]={"VDDQ",fmt1(g_active.vddqVoltageUv/1000.0)+" mV",false};
+'''
+          new_values = '''    gui::View v;v.version=HOC_WIZARD_VERSION;v.activeStep=progressStep(g.stage);v.pulse=true;v.haveActiveValues=false;
+
+    auto setValue=[&](int i,const char* label,const std::string& value){v.values[i]={label,value,false};};
+    if(g.stage>=Stage::RamPreparation && g.stage<=Stage::RamFinalGraph){
+        v.haveActiveValues=true;
+        const int dvbNow=g.dvbApplied?g.dvbCandidate:g.dvbGood;
+        setValue(0,"RAM",fmt1(g_active.realHz[2]/1e6)+" MHz");
+        setValue(1,"VDD2",fmt1(g_active.vdd2VoltageUv/1000.0)+" mV");
+        setValue(2,"VDDQ",fmt1(g_active.vddqVoltageUv/1000.0)+" mV");
+        setValue(3,"SoC",fmt1(g_active.socVoltageUv/1000.0)+" mV");
+        setValue(4,"DVB Shift",std::to_string(dvbNow));
+    }else if(g.stage>=Stage::GpuPreparation && g.stage<=Stage::GpuRamCombined){
+        v.haveActiveValues=true;
+        setValue(0,"GPU",fmt1(g_active.realHz[1]/1e6)+" MHz");
+        setValue(1,"GPU Voltage",fmt1(g_active.gpuVoltageUv/1000.0)+" mV");
+        setValue(2,"RAM",fmt1(g_active.realHz[2]/1e6)+" MHz");
+        setValue(3,"SoC",fmt1(g_active.socVoltageUv/1000.0)+" mV");
+        setValue(4,"VDD2",fmt1(g_active.vdd2VoltageUv/1000.0)+" mV");
+    }else if(g.stage>=Stage::CpuPreparation && g.stage<=Stage::CpuRamCombined){
+        v.haveActiveValues=true;
+        setValue(0,"CPU",fmt1(g_active.realHz[0]/1e6)+" MHz");
+        setValue(1,"CPU Voltage",fmt1(g_active.cpuVoltageUv/1000.0)+" mV");
+        setValue(2,"RAM",fmt1(g_active.realHz[2]/1e6)+" MHz");
+        if(g.stage==Stage::CpuLowUv || g.stage==Stage::CpuLowVmin){
+            const int lowUvNow=g.lowUvApplied?g.lowUvCandidate:g.lowUvGood;
+            const int lowVminNow=g.lowVminApplied?g.lowVminCandidate:g.lowBestVmin;
+            setValue(3,"Low UV",std::to_string(lowUvNow));
+            setValue(4,"Low VMIN",std::to_string(lowVminNow)+" mV");
+        }else if(g.stage==Stage::CpuTbreak2Set || g.stage==Stage::CpuTbreak2Test || g.stage==Stage::CpuTbreak3Set || g.stage==Stage::CpuTbreak3Test){
+            const int tb=(g.stage==Stage::CpuTbreak2Set || g.stage==Stage::CpuTbreak2Test)?2:3;
+            const int highUvNow=g.highUvApplied?g.highUvCandidate:g.highUvGood;
+            setValue(3,"High UV",std::to_string(highUvNow));
+            setValue(4,"TBreak",std::to_string(tb));
+        }else if(g.stage==Stage::CpuVmax){
+            const int vmaxNow=g.vmaxApplied?g.vmaxCandidate:g.vmaxGood;
+            setValue(3,"High UV",std::to_string(g.highUvGood));
+            setValue(4,"VMAX",std::to_string(vmaxNow)+" mV");
+        }else{
+            const int highUvNow=g.highUvApplied?g.highUvCandidate:g.highUvGood;
+            const int highVminNow=g.highVminApplied?g.highVminCandidate:g.highVminGood;
+            setValue(3,"High UV",std::to_string(highUvNow));
+            setValue(4,"High VMIN",std::to_string(highVminNow)+" mV");
+        }
+    }
+'''
+          if old_values not in s:
+              raise SystemExit('active-values block not found')
+          s = s.replace(old_values, new_values, 1)
+
+          hardware = '''        case Stage::Hardware:{
+            const bool detected=g.dramId>=0;
+            v.stageTitle="Hardware Detection";
+            v.instructionTitle=detected?"Hardware detected":"Detect this console";
+            v.instructionLine1=detected?"Review the detected RAM before tuning begins.":"The Wizard will identify the installed RAM and select its HOC table.";
+            v.instructionLine2=detected?"A  Continue":"A  Detect hardware";
+            gui::begin(v);
+            if(!detected){
+                print(1,"Detect the installed memory before the OC search starts.");
+            }else{
+                print(1,"DRAM ID: "+std::to_string(g.dramId));
+                if(profile()){
+                    print(3,std::string("Detected RAM: ")+profile()->name+"  |  Tier "+profile()->tier);
+                    print(4,"Expected Max OC: "+std::to_string(profile()->minMHz)+"-"+std::to_string(profile()->maxMHz)+" MHz");
+                    print(6,"The measured stable limit may be lower or higher within HOC's supported range.");
+                }else{
+                    print(3,"RAM preset: manual only / unsupported ID");
+                    print(4,"Expected Max OC: unavailable");
+                }
+            }
+            print(8,detected?"A : Continue":"A : Detect hardware");
+            print(9,"B : Exit");
+            gui::present();break;
+        }
+        case Stage::BenchmarkPrep:'''
+          pat = r'        case Stage::Hardware:\{.*?gui::present\(\);break;\}\n        case Stage::BenchmarkPrep:'
+          s, n = re.subn(pat, hardware, s, count=1, flags=re.S)
+          if n != 1:
+              raise SystemExit('hardware page block not found')
+
+          s = s.replace('Required: battery >=95%, charger connected, brightness fixed at 100%.',
+                        'Required: battery 100%, charger connected, brightness fixed at 100%.', 1)
+          s = s.replace('Disable screen dimming / system sleep and keep dock/handheld state unchanged.',
+                        'Battery must read 100% so charging current does not bias benchmark comparisons.', 1)
+          s = s.replace('Battery-side HOC power is logged only as supplemental telemetry while charging.',
+                        'Disable screen dimming / system sleep and keep dock/handheld state unchanged.', 1)
+
+          old_hw_handler = '''        if(g.stage==Stage::Hardware&&(k&HidNpadButton_A)){detectHardware();if(!g_errorModal){if(!profile())modalError("This DRAM ID has no safe automatic profile. Beta 1 will not write guessed timings.");else{g.stage=Stage::BenchmarkPrep;saveState();}}redraw=true;continue;}'''
+          new_hw_handler = '''        if(g.stage==Stage::Hardware&&(k&HidNpadButton_A)){if(g.dramId<0){detectHardware();if(!g_errorModal&&!profile())modalError("This DRAM ID has no safe automatic timing profile. Automatic RAM preparation is unavailable.");}else if(profile()){g.stage=Stage::BenchmarkPrep;saveState();}else modalError("Automatic RAM preparation is unavailable for this DRAM ID.");redraw=true;continue;}'''
+          if old_hw_handler not in s:
+              raise SystemExit('hardware input handler not found')
+          s = s.replace(old_hw_handler, new_hw_handler, 1)
+
+          old_bat = '''else if(pct<95)modalError("Charge the console to at least 95% before starting the benchmark series.");'''
+          new_bat = '''else if(pct<100)modalError("Charge the console to 100% before starting the benchmark series.");'''
+          if old_bat not in s:
+              raise SystemExit('battery threshold handler not found')
+          s = s.replace(old_bat, new_bat, 1)
+
+          p.write_text(s)
+
+          mf = Path('Makefile')
+          m = mf.read_text()
+          if 'APP_VERSION := 0.1.0-beta.1' not in m:
+              raise SystemExit('Makefile beta1 version not found')
+          mf.write_text(m.replace('APP_VERSION := 0.1.0-beta.1','APP_VERSION := 0.1.0-beta.2',1))
+
+          Path('RELEASE_NOTES_v0.1.0-beta.2.md').write_text('''# HOC Overclocking Wizard v0.1.0-beta.2\n\n- Benchmark preparation now requires a true 100% battery reading while connected to the charger.\n- Hardware Detection now shows the detected RAM class and its Expected Max OC range.\n- Removed internal/developer-facing reference-console wording from Hardware Detection.\n- Active Values are now context-aware: RAM tuning shows RAM/VDD2/VDDQ/SoC/DVB, GPU tuning shows GPU voltage plus RAM context, and CPU tuning shows the CPU voltage/UV/VMIN/TBreak/VMAX values relevant to the current stage.\n- Hardware/benchmark setup pages no longer show an irrelevant generic active-values card.\n''')
+          PY
+
+          git config user.name "retrotendo"
+          git config user.email "info@retrotendo.de"
+          git add source/main_oc.cpp Makefile RELEASE_NOTES_v0.1.0-beta.2.md
+          git commit -m "Prepare v0.1.0-beta.2 UI and benchmark fixes"
+          git push origin HEAD:oc-wizard-beta2
