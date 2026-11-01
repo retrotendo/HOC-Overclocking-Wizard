@@ -1,0 +1,32 @@
+name: Patch beta1 compile blocker
+on:
+  push:
+    branches: [oc-wizard-beta1]
+    paths:
+      - '.github/workflows/patch-beta1-compile.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: oc-wizard-beta1
+      - name: Patch source
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('source/main_oc.cpp')
+          s=p.read_text()
+          old='''#define W(x) f << #x << '=' << g.x << '\\n'\n    W(stage); W(dramId); W(is8GB); W(consoleType); W(profileIndex); W(benchmarkReady);'''
+          new='''f << "stage=" << int(g.stage) << '\\n';\n#define W(x) f << #x << '=' << g.x << '\\n'\n    W(dramId); W(is8GB); W(consoleType); W(profileIndex); W(benchmarkReady);'''
+          if old not in s:
+              raise SystemExit('saveState pattern not found')
+          p.write_text(s.replace(old,new,1))
+          PY
+          git config user.name retrotendo
+          git config user.email info@retrotendo.de
+          git add source/main_oc.cpp
+          git commit -m 'Fix beta1 stage state serialization'
+          git push origin HEAD:oc-wizard-beta1
