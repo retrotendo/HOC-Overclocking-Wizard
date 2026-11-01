@@ -1,0 +1,83 @@
+name: Publish v0.1.0-beta.14
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v0.1.0-beta.14.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply beta9 cumulative base
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import textwrap
+          w=Path('.github/workflows/release-v0.1.0-beta.9.yml').read_text()
+          blocks=[]
+          pos=0
+          marker="          python3 - <<'PY'\n"
+          while True:
+              try:
+                  start=w.index(marker,pos)+len(marker)
+              except ValueError:
+                  break
+              end=w.index("\n          PY",start)
+              blocks.append(textwrap.dedent(w[start:end]))
+              pos=end+1
+          if len(blocks) != 3:
+              raise SystemExit(f'Expected 3 beta9 patch blocks, found {len(blocks)}')
+          for i,code in enumerate(blocks):
+              exec(compile(code,f'beta9-{i+1}','exec'))
+          PY
+
+      - name: Apply beta12 RAM flow
+        run: python3 .github/scripts/build_beta12_patch.py
+
+      - name: Apply beta12 compile fix
+        run: python3 .github/scripts/build_beta12_fix.py
+
+      - name: Apply beta13 fixes
+        run: python3 .github/scripts/build_beta13_patch.py
+
+      - name: Apply beta14 config validation fixes
+        run: python3 .github/scripts/build_beta14_patch.py
+
+      - name: Build NRO
+        run: make -j2
+
+      - name: Checksum
+        run: sha256sum HOC-Overclocking-Wizard.nro > HOC-Overclocking-Wizard.nro.sha256
+
+      - name: Publish pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.0-beta.14
+          target_commitish: main
+          name: HOC Overclocking Wizard v0.1.0-beta.14
+          prerelease: true
+          make_latest: false
+          body: |
+            Beta 14 fixes RAM Max Clock Search validation against the selected HOC configuration.
+            - RAM preparation/test guard now compares the HOC config-selected values against the exact Wizard SET values for the current stage, not live telemetry.
+            - The RAM sweep baseline uses the detected RAM profile VDD2/VDDQ values, fixing false mismatches such as 640 mV profile VDDQ versus the old 600 mV internal default.
+            - RAM-only override validation checks only RAM override/real clock; CPU/GPU idle clocks cannot block RAM tests.
+            - Hardware Detection displays configuration-selected RAM values rather than live voltage telemetry.
+            - HOC 12.5 mV SoC steps preserve the visible .5 mV value where applicable (for example 637.5 mV).
+            - RAM Max Clock Search reboot warning is kept on one red line.
+            - SoC VMAX remains capped at 1150 mV.
+            - RAM flow remains Clock -> DVB -> HP -> Tight/ST -> SoC -> Sweet Spot -> Max Clock = Sweet Spot -> VDD2 -> VDDQ.
+            - GPU and CPU tuning logic is unchanged.
+          files: |
+            HOC-Overclocking-Wizard.nro
+            HOC-Overclocking-Wizard.nro.sha256
