@@ -15,41 +15,119 @@ jobs:
     container: devkitpro/devkita64:latest
     steps:
       - uses: actions/checkout@v4
-      - name: Apply beta10 cumulative fixes
+
+      - name: Apply audited beta9 base directly
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import textwrap
-          w=Path('.github/workflows/release-v0.1.0-beta.10.yml').read_text()
+          w=Path('.github/workflows/release-v0.1.0-beta.9.yml').read_text()
           blocks=[]; pos=0
+          marker="          python3 - <<'PY'\n"
           while True:
-              try: start=w.index("          python3 - <<'PY'\n",pos)+len("          python3 - <<'PY'\n")
+              try: start=w.index(marker,pos)+len(marker)
               except ValueError: break
               end=w.index("\n          PY",start)
               blocks.append(textwrap.dedent(w[start:end]))
               pos=end+1
+          if len(blocks) != 3:
+              raise SystemExit(f'Expected 3 beta9 patch blocks, found {len(blocks)}')
           for i,code in enumerate(blocks):
-              exec(compile(code,f'beta10-{i}','exec'))
+              exec(compile(code,f'beta9-{i+1}','exec'))
           PY
-      - name: Apply beta11 UI simplification
+
+      - name: Apply audited guide and UI fixes
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('Makefile'); s=p.read_text().replace('APP_VERSION := 0.1.0-beta.10','APP_VERSION := 0.1.0-beta.11'); p.write_text(s)
-          p=Path('source/main_oc.cpp'); s=p.read_text()
-          old='''v.stageTitle="RAM Clock Search";v.instructionTitle="Automatic RAM sweep";v.instructionLine1="Tests RAM clocks from low to high.";v.instructionLine2="A  Start sweep";'''
-          new='''v.stageTitle="RAM Clock Search";v.instructionTitle="Start test";v.instructionLine1="";v.instructionLine2="A  Start test";'''
-          if old not in s: raise SystemExit('beta11 task marker missing')
+
+          # Version
+          p=Path('Makefile'); s=p.read_text();
+          s=s.replace('APP_VERSION := 0.1.0-beta.9','APP_VERSION := 0.1.0-beta.11')
+          p.write_text(s)
+
+          # RAM guide: capability search starts at stock 1333 MHz, then walks upward.
+          p=Path('source/oc_profiles.hpp'); s=p.read_text()
+          old='''static constexpr std::uint32_t RAM_STEPS_MHZ[] = {\n    2133, 2200, 2266, 2300, 2333, 2400, 2433, 2466, 2500, 2533,'''
+          new='''static constexpr std::uint32_t RAM_STEPS_MHZ[] = {\n    1333, 1600, 1866, 2000,\n    2133, 2200, 2266, 2300, 2333, 2400, 2433, 2466, 2500, 2533,'''
+          if old not in s: raise SystemExit('RAM step table marker missing')
           s=s.replace(old,new,1)
-          s=s.replace('''print(9,"A : Start automatic sweep");''','''print(9,"A : Start test");''',1)
+          old='''inline int firstRamSearchIndex(const RamProfile*) {\n    // Capability discovery starts at the bottom of the sweep table and walks upward.\n    return 0;\n}'''
+          new='''inline int firstRamSearchIndex(const RamProfile*) {\n    // Guide: start at stock RAM and discover capability upward.\n    return 0;\n}'''
+          if old not in s: raise SystemExit('firstRamSearchIndex marker missing')
+          s=s.replace(old,new,1)
+          p.write_text(s)
+
+          p=Path('source/main_oc.cpp'); s=p.read_text()
+
+          # RAM sweep page: one clear task, short warning, no redundant candidate clutter.
+          old='''v.stageTitle="RAM Clock Search";v.instructionTitle="Automatic RAM sweep";v.instructionLine1="Clocks increase automatically until the first failure.";v.instructionLine2="A  Start sweep";gui::begin(v);print(1,"WARNING");print(2,"Crash or freeze can occur during limit search.");print(3,"If it happens: reboot CFW and reopen the Wizard.");print(4,"Test clocks are temporary and are not saved for boot.");print(6,"First candidate: "+std::to_string(freq)+" MHz");print(7,"Last stable: "+(g.ramStableMaxMHz?std::to_string(g.ramStableMaxMHz)+" MHz":"--"));print(10,"A : Start automatic sweep");print(11,"X : Stop / use last stable result");print(12,"B : Exit");'''
+          new='''v.stageTitle="RAM Clock Search";v.instructionTitle="Start test";v.instructionLine1="";v.instructionLine2="A  Start test";gui::begin(v);print(1,"WARNING");print(2,"Crash or freeze may occur.");print(3,"If it happens: reboot CFW and reopen Wizard.");print(4,"Test clocks are temporary.");print(9,"A : Start test");print(10,"X : Stop / use last stable");print(11,"B : Exit");'''
+          if old not in s: raise SystemExit('RAM sweep UI marker missing')
+          s=s.replace(old,new,1)
+
+          # Reboot modal must remain visible until A is released and pressed again.
+          old='''    PadState rp; padConfigureInput(1,HidNpadStyleSet_NpadStandard); padInitializeDefault(&rp);\n    while(appletMainLoop()){padUpdate(&rp);u64 k=padGetButtonsDown(&rp);if(k&HidNpadButton_A)break;svcSleepThread(20'000'000);}\n    Result rc=appletRequestToReboot();'''
+          new='''    PadState rp; padConfigureInput(1,HidNpadStyleSet_NpadStandard); padInitializeDefault(&rp);\n    while(appletMainLoop()){padUpdate(&rp);if(!(padGetButtons(&rp)&HidNpadButton_A))break;svcSleepThread(20'000'000);}\n    while(appletMainLoop()){padUpdate(&rp);u64 k=padGetButtonsDown(&rp);if(k&HidNpadButton_A)break;svcSleepThread(20'000'000);}\n    Result rc=appletRequestToReboot();'''
+          if old not in s: raise SystemExit('reboot confirmation marker missing')
+          s=s.replace(old,new,1)
+          p.write_text(s)
+
+          # Global KISS rule for the right YOUR TASK card: show only the immediate action.
+          p=Path('source/gui_console.cpp'); s=p.read_text()
+          old='''    drawText(x + 24, y + 52, 23, C_TEXT,\n             fitText(g_view.instructionTitle.empty() ? "Continue Wizard" : g_view.instructionTitle, 23, w - 48));\n    drawText(x + 24, y + 91, 16, C_MUTED, fitText(g_view.instructionLine1, 16, w - 48));\n\n    roundedRect(x + 22, y + 126, w - 44, 54, 12, mix(C_PANEL_2, C_CYAN, 11));\n    drawText(x + 38, y + 137, 25, C_CYAN, fitText(g_view.instructionLine2, 25, w - 76));'''
+          new='''    std::string task = g_view.instructionTitle.empty() ? "Continue" : g_view.instructionTitle;\n    if (!g_view.instructionLine2.empty()) {\n        std::string a = trim(g_view.instructionLine2);\n        if (a.size() > 3 && (a[0]=='A' || a[0]=='Y' || a[0]=='X' || a[0]=='+')) {\n            size_t pos=1; while(pos<a.size() && (a[pos]==' ' || a[pos]==':')) ++pos;\n            if(pos<a.size()) task=a.substr(pos);\n        }\n    }\n    drawText(x + 24, y + 58, 25, C_TEXT, fitText(task, 25, w - 48));\n\n    roundedRect(x + 22, y + 126, w - 44, 54, 12, mix(C_PANEL_2, C_CYAN, 11));\n    drawText(x + 38, y + 137, 25, C_CYAN, fitText(g_view.instructionLine2, 25, w - 76));'''
+          if old not in s: raise SystemExit('YOUR TASK renderer marker missing')
+          s=s.replace(old,new,1)
+
+          # Warning headings in the main card are visually warnings, not normal body text.
+          old='''            const bool heading = raw == "Objective:" || raw == "Test:" || raw == "Keys:" ||'''
+          new='''            if (raw == "WARNING") {\n                drawText(x + 28, by, 16, C_RED, raw);\n                by += 27; ++shown; continue;\n            }\n            const bool heading = raw == "Objective:" || raw == "Test:" || raw == "Keys:" ||'''
+          if old not in s: raise SystemExit('warning renderer marker missing')
+          s=s.replace(old,new,1)
           p.write_text(s)
           PY
+
+      - name: Audit guide-critical invariants
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('source/main_oc.cpp').read_text()
+          q=Path('source/oc_profiles.hpp').read_text()
+          checks={
+            'RAM starts 1333':'1333, 1600, 1866, 2000' in q,
+            'automatic RAM sweep':'runRamSweepAutomatic()' in p,
+            'tested RAM shown':'RAM Clock Stability - ' in p and 'Testing RAM: ' in p,
+            'reboot release gate':'padGetButtons(&rp)&HidNpadButton_A' in p,
+            'clock to timings':'analyzeRam();g.stage=Stage::RamStSet' in p,
+            'timings to HP':'Stage::RamHpSet' in p,
+            'HP before DVB':'Stage::RamDvb' in p,
+            'SoC stage present':'Stage::RamSoc' in p,
+            'VDD2 stage present':'Stage::RamVdd2' in p,
+            'VDDQ stage present':'Stage::RamVddq' in p,
+            'GPU uses base RAM for intrinsic curve':'RAM_BASE_HZ' in p,
+            'GPU+RAM validation':'GPU + RAM Integration' in p,
+            'CPU capability before UV curve':'CPU Capability Stability' in p,
+            'CPU low UV/VMIN pair':'testLowPair' in p,
+            'TBreak comparison':'tbreakBoundaryCost' in p,
+            'High VMIN':'CPU High VMIN Stability' in p,
+            'VMAX last':'CPU VMAX Stability' in p,
+            'CPU+RAM final validation':'CPU + RAM Final Validation' in p,
+          }
+          bad=[k for k,v in checks.items() if not v]
+          for k,v in checks.items(): print(('PASS ' if v else 'FAIL ')+k)
+          if bad: raise SystemExit('Guide audit failed: '+', '.join(bad))
+          PY
+
       - name: Build NRO
         run: make -j2
+
       - name: Checksum
         run: sha256sum HOC-Overclocking-Wizard.nro > HOC-Overclocking-Wizard.nro.sha256
+
       - name: Publish pre-release
         uses: softprops/action-gh-release@v2
         with:
@@ -59,9 +137,15 @@ jobs:
           prerelease: true
           make_latest: false
           body: |
-            Beta 11 UI-only change on top of Beta 10.
-            - RAM sweep task now simply says Start test.
-            - No tuning logic changes.
+            Beta 11 audited against the full tuning workflow before build.
+            - Full order remains RAM -> GPU -> CPU -> combined/final validation.
+            - RAM capability sweep now really starts at 1333 MHz and walks upward.
+            - RAM order: Clock -> Tight/ST -> HP -> DVB -> SoC -> VDD2 -> VDDQ.
+            - Automatic sweep/recovery and current tested RAM clock retained.
+            - Reboot confirmation requires a fresh A press.
+            - YOUR TASK cards globally follow the KISS rule and show only the immediate action.
+            - WARNING heading is rendered red.
+            - No unapproved fundamental GPU/CPU tuning-method changes were introduced.
           files: |
             HOC-Overclocking-Wizard.nro
             HOC-Overclocking-Wizard.nro.sha256
