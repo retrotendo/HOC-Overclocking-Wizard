@@ -1,0 +1,153 @@
+name: Publish v0.1.0-beta.9
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v0.1.0-beta.9.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply beta8 cumulative fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('Makefile'); s=p.read_text(); s=s.replace('APP_VERSION := 0.1.0-beta.3','APP_VERSION := 0.1.0-beta.9'); p.write_text(s)
+
+          p=Path('source/oc_config.hpp'); s=p.read_text()
+          needle='LayoutInfo detect();\n'
+          add='''LayoutInfo detect();\n\nstruct RamConfig {\n    bool ok = false;\n    bool hpMode = false;\n    std::uint32_t ramMaxMHz = 0;\n    std::uint32_t vdd2Uv = 0;\n    std::uint32_t vddqUv = 0;\n    int dvbShift = 0;\n    int socVmaxMv = 0;\n    std::uint32_t timings[8]{};\n};\n\nbool getRamConfig(RamConfig& out, std::string& error);\n'''
+          if needle not in s: raise SystemExit('hpp marker missing')
+          s=s.replace(needle,add,1); p.write_text(s)
+
+          p=Path('source/oc_config.cpp'); s=p.read_text()
+          marker='''bool setRamPreparation(bool hpMode,std::uint32_t ramMaxMHz'''
+          getter='''bool getRamConfig(RamConfig& out,std::string& error){\n    std::array<u64,256> v{};bool old=false;const Idx*i=nullptr;if(!read(v,old,i,error))return false;\n    out.ok=true;out.hpMode=v[i->hp]!=0;out.ramMaxMHz=std::uint32_t(v[i->ramMax]/1000ULL);out.vdd2Uv=std::uint32_t(v[i->memVolt]);out.vddqUv=std::uint32_t(v[i->vddq]);out.dvbShift=int(v[i->dvb]);out.socVmaxMv=int(v[i->socVmax]);for(int n=0;n<8;++n)out.timings[n]=std::uint32_t(v[i->timing0+n]);return true;\n}\n\n'''
+          if marker not in s: raise SystemExit('cpp marker missing')
+          s=s.replace(marker,getter+marker,1); p.write_text(s)
+
+          p=Path('source/main_oc.cpp'); s=p.read_text()
+          old='''            gui::begin(v);\n            if(!detected){'''
+          new='''            if(detected){\n                occonfig::RamConfig rc{}; std::string re;\n                if(occonfig::getRamConfig(rc,re)){\n                    v.haveActiveValues=true;\n                    std::ostringstream rt; for(int i=0;i<8;++i){if(i)rt<<'-';rt<<rc.timings[i];}\n                    setValue(0,"RAM Timings",rt.str());\n                }\n            }\n            gui::begin(v);\n            if(!detected){'''
+          if old not in s: raise SystemExit('hardware marker missing')
+          s=s.replace(old,new,1)
+          old='''        case Stage::RamPreparation:{v.stageTitle="RAM Preparation";v.preparationLayout=true;v.hideValuesCard=true;v.instructionTitle="Set the RAM search baseline";v.instructionLine1="Common timings first; HP and ST are validated after max clock discovery.";v.instructionLine2="Y  Apply automatically";const auto*p=profile();gui::begin(v);'''
+          new='''        case Stage::RamPreparation:{v.stageTitle="RAM Preparation";v.preparationLayout=true;v.hideValuesCard=true;v.instructionTitle="Set the RAM search baseline";v.instructionLine1="Common timings first. Tight/ST and HP are tested after the clock sweep.";v.instructionLine2="Y  Apply automatically";const auto*p=profile();\n            if(p){\n                occonfig::RamConfig rc{};std::string re;const bool have=occonfig::getRamConfig(rc,re);v.havePreparationActiveValues=have;\n                auto row=[&](const char*g,const char*l,const std::string&set,const std::string&act,bool mm){v.preparationRows.push_back({g,l,set,act,mm});};\n                auto timingString=[&](const std::uint32_t*t){std::ostringstream o;for(int i=0;i<8;++i){if(i)o<<'-';o<<t[i];}return o.str();};\n                row("RAM","Max Clock","3400 MHz",have?std::to_string(rc.ramMaxMHz)+" MHz":"unavailable",have&&rc.ramMaxMHz!=3400);\n                row("RAM","VDD2",std::to_string(p->vdd2Mv)+" mV",have?fmtMvUv(int(rc.vdd2Uv)):"unavailable",have&&int(rc.vdd2Uv)!=p->vdd2Mv*1000);\n                row("RAM","VDDQ",std::to_string(p->vddqMv)+" mV",have?fmtMvUv(int(rc.vddqUv)):"unavailable",have&&int(rc.vddqUv)!=p->vddqMv*1000);\n                row("RAM","HP Mode","OFF",have?(rc.hpMode?"ON":"OFF"):"unavailable",have&&rc.hpMode);\n                row("RAM","DVB Shift","5",have?std::to_string(rc.dvbShift):"unavailable",have&&rc.dvbShift!=5);\n                row("RAM","SoC VMAX","1200 mV",have?std::to_string(rc.socVmaxMv)+" mV":"unavailable",have&&rc.socVmaxMv!=1200);\n                row("RAM","Common Timings",timingString(p->common.t),have?timingString(rc.timings):"unavailable",have&&timingString(rc.timings)!=timingString(p->common.t));\n            }\n            gui::begin(v);'''
+          if old not in s: raise SystemExit('preparation marker missing')
+          s=s.replace(old,new,1); p.write_text(s)
+          PY
+
+      - name: Apply beta9 RAM sweep and order fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('source/oc_profiles.hpp'); s=p.read_text()
+          old='''inline int firstRamSearchIndex(const RamProfile* p) {\n    const std::uint32_t target = p ? (p->minMHz > 150 ? p->minMHz - 150 : p->minMHz) : 2400;\n    int best = 0;\n    for (int i = 0; i < int(sizeof(RAM_STEPS_MHZ)/sizeof(RAM_STEPS_MHZ[0])); ++i) {\n        if (RAM_STEPS_MHZ[i] <= target) best = i;\n        else break;\n    }\n    return best;\n}'''
+          new='''inline int firstRamSearchIndex(const RamProfile*) {\n    // Capability discovery starts at the bottom of the sweep table and walks upward.\n    return 0;\n}'''
+          if old not in s: raise SystemExit('firstRamSearchIndex marker missing')
+          s=s.replace(old,new,1); p.write_text(s)
+
+          p=Path('source/main_oc.cpp'); s=p.read_text()
+          # Beta 8 automatic sweep + compact readable start page.
+          old='''        case Stage::RamSweep:{int freq=(g.ramSearchIndex>=0)?int(oc::RAM_STEPS_MHZ[g.ramSearchIndex]):0;v.stageTitle="RAM Clock Search";v.instructionTitle="Test the next RAM clock";v.instructionLine1="Real-clock / PLL check, stability test and Memory Benchmark.";v.instructionLine2="A  Start test";gui::begin(v);print(1,"The table range is guidance, not a hard device limit; search may continue to the HOC safe ceiling.");print(3,"Candidate: "+std::to_string(freq)+" MHz");print(4,"Last stable: "+std::to_string(g.ramStableMaxMHz)+" MHz");print(8,"A : Run candidate test");print(9,"X : Known unstable / stop upward search");print(10,"B : Exit");gui::present();break;}'''
+          new='''        case Stage::RamSweep:{int freq=(g.ramSearchIndex>=0&&g.ramSearchIndex<=g.ramSearchEndIndex)?int(oc::RAM_STEPS_MHZ[g.ramSearchIndex]):0;v.stageTitle="RAM Clock Search";v.instructionTitle="Automatic RAM sweep";v.instructionLine1="Clocks increase automatically until the first failure.";v.instructionLine2="A  Start sweep";gui::begin(v);print(1,"WARNING");print(2,"Crash or freeze can occur during limit search.");print(3,"If it happens: reboot CFW and reopen the Wizard.");print(4,"Test clocks are temporary and are not saved for boot.");print(6,"First candidate: "+std::to_string(freq)+" MHz");print(7,"Last stable: "+(g.ramStableMaxMHz?std::to_string(g.ramStableMaxMHz)+" MHz":"--"));print(10,"A : Start automatic sweep");print(11,"X : Stop / use last stable result");print(12,"B : Exit");gui::present();break;}'''
+          if old not in s: raise SystemExit('RamSweep UI block not found')
+          s=s.replace(old,new,1)
+
+          marker='''void validateHp(){'''
+          helper='''void runRamSweepAutomatic(){\n    while(g.stage==Stage::RamSweep && g.ramSearchIndex>=0 && g.ramSearchIndex<=g.ramSearchEndIndex){\n        const int before=g.ramSearchIndex;\n        runRamCandidate();\n        if(g_errorModal || g.stage!=Stage::RamSweep) return;\n        if(g.ramSearchIndex==before) return;\n        svcSleepThread(250'000'000);\n    }\n    if(g.stage==Stage::RamSweep) finishRamSweep();\n}\n\n'''
+          if marker not in s: raise SystemExit('validateHp marker missing')
+          s=s.replace(marker,helper+marker,1)
+          oldhandler='''        if(g.stage==Stage::RamSweep){if(k&HidNpadButton_A){runRamCandidate();redraw=true;continue;}if(k&HidNpadButton_X){finishRamSweep();redraw=true;continue;}}'''
+          newhandler='''        if(g.stage==Stage::RamSweep){if(k&HidNpadButton_A){runRamSweepAutomatic();redraw=true;continue;}if(k&HidNpadButton_X){finishRamSweep();redraw=true;continue;}}'''
+          if oldhandler not in s: raise SystemExit('RamSweep input handler missing')
+          s=s.replace(oldhandler,newhandler,1)
+
+          # Reboot acknowledgement retained from beta8.
+          old='''bool requestReboot(Stage next) {\n    clearOverrides(); g.stage=next; g.rebootPending=1; saveState();\n    gui::ModalView m; m.version=HOC_WIZARD_VERSION; m.eyebrow="SETTINGS SAVED"; m.title="Restart required"; m.body={"The new HOC/KIP values were saved.","The Wizard will continue automatically after reboot."}; m.tone=gui::ModalTone::Amber; gui::presentModal(m); svcSleepThread(400'000'000);\n    Result rc=appletRequestToReboot(); if(R_FAILED(rc)){g.rebootPending=0;saveState();g_message="Automatic reboot failed. Restart CFW manually, then reopen the Wizard.";g_errorModal=true;return false;} return true;\n}'''
+          new='''bool requestReboot(Stage next) {\n    clearOverrides(); g.stage=next; g.rebootPending=1; saveState();\n    gui::ModalView m; m.version=HOC_WIZARD_VERSION; m.eyebrow="SETTINGS SAVED"; m.title="Restart required"; m.body={"The new Horizon OC values were saved.","Press A to reboot now. After CFW starts, reopen the Wizard.","The Wizard resumes at the next step."}; m.primaryAction="A  Reboot now"; m.tone=gui::ModalTone::Amber; gui::presentModal(m);\n    PadState rp; padConfigureInput(1,HidNpadStyleSet_NpadStandard); padInitializeDefault(&rp);\n    while(appletMainLoop()){padUpdate(&rp);u64 k=padGetButtonsDown(&rp);if(k&HidNpadButton_A)break;svcSleepThread(20'000'000);}\n    Result rc=appletRequestToReboot(); if(R_FAILED(rc)){g.rebootPending=0;saveState();g_message="Automatic reboot failed. Restart CFW manually, then reopen the Wizard.";g_errorModal=true;return false;} return true;\n}'''
+          if old not in s: raise SystemExit('requestReboot marker missing')
+          s=s.replace(old,new,1)
+
+          # Resume repair retained, now always starts at table bottom if sweep was never initialized.
+          old='''    if(g.rebootPending){g.rebootPending=0;saveState();}\n    if(g.testRunning)g_recoveryModal=true;\n    if(g.dramId<0)detectHardware();'''
+          new='''    if(g.rebootPending){g.rebootPending=0;saveState();}\n    if(g.testRunning)g_recoveryModal=true;\n    if(g.dramId<0)detectHardware();\n    if(g.stage==Stage::RamSweep && !g_recoveryModal){\n        const auto* rp=profile();\n        if(rp && (g.ramSearchIndex<0 || g.ramSearchEndIndex<0 || g.ramSearchIndex>g.ramSearchEndIndex)){\n            g.ramSearchIndex=oc::firstRamSearchIndex(rp); g.ramSearchEndIndex=ramEndIndex(); g.ramStableMaxMHz=0; saveState();\n        }\n    }'''
+          if old not in s: raise SystemExit('startup marker missing')
+          s=s.replace(old,new,1)
+
+          # Interrupted sweep: last incomplete candidate is the fail point, retain prior stable result.
+          oldrec='''    switch(g.stage){\n        case Stage::RamDvb:'''
+          newrec='''    switch(g.stage){\n        case Stage::RamSweep:clearOverrides();g.testRunning=0;g.testStage=-1;finishRamSweep();return;\n        case Stage::RamDvb:'''
+          if oldrec not in s: raise SystemExit('recovery marker missing')
+          s=s.replace(oldrec,newrec,1)
+
+          # User-confirmed RAM order: clock -> timings -> HP -> DVB -> SoC -> VDD2 -> VDDQ.
+          s=s.replace('''g.stage=Stage::RamHpSet;saveState();''','''g.stage=Stage::RamStSet;saveState();''')
+          s=s.replace('''v.instructionLine1="ST is attempted only after clock capability and HP are known."''','''v.instructionLine1="Tight/ST timings are tested directly after clock capability."''')
+          s=s.replace('''g.stage=Stage::RamDvb;saveState();''','''g.stage=Stage::RamHpSet;saveState();''')
+          s=s.replace('''requestReboot(Stage::RamDvb)''','''requestReboot(Stage::RamHpSet)''')
+          # HP validation now continues to DVB.
+          s=s.replace('''g.stage=Stage::RamStSet;saveState();''','''g.stage=Stage::RamDvb;saveState();''',1)
+          # Explicitly fix the clock-result transition back to timing stage after the previous generic replacement.
+          s=s.replace('''analyzeRam();g.stage=Stage::RamDvb;saveState();''','''analyzeRam();g.stage=Stage::RamStSet;saveState();''')
+          # DVB -> SoC, SoC -> VDD2, VDD2 -> VDDQ, VDDQ -> final graph.
+          s=s.replace('''requestReboot(Stage::RamVdd2)''','''requestReboot(Stage::RamSoc)''')
+          s=s.replace('''requestReboot(Stage::RamVddq)''','''requestReboot(Stage::RamFinalGraph)''')
+          s=s.replace('''requestReboot(Stage::RamSoc)''','''requestReboot(Stage::RamVdd2)''',1)
+          s=s.replace('''requestReboot(Stage::RamFinalGraph)''','''requestReboot(Stage::RamVddq)''',1)
+          p.write_text(s)
+          PY
+
+      - name: Apply beta9 stress display and chart spacing fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('source/main_oc.cpp'); s=p.read_text()
+          # Put current tested RAM frequency in the stability-test title/detail passed to the stress view.
+          old='''runStress(stress::Kind::Memory,45,"RAM Clock Stability","RAM "+std::to_string(freq)+" MHz")'''
+          new='''runStress(stress::Kind::Memory,45,"RAM Clock Stability - "+std::to_string(freq)+" MHz","Testing RAM: "+std::to_string(freq)+" MHz")'''
+          if old in s: s=s.replace(old,new)
+          p.write_text(s)
+
+          p=Path('source/gui_console.cpp'); s=p.read_text()
+          # Move full-width chart action buttons below the legend/chart labels instead of covering them.
+          old='''const int actionY = 596;'''
+          if old in s: s=s.replace(old,'''const int actionY = 640;''')
+          p.write_text(s)
+          PY
+
+      - name: Build NRO
+        run: make -j2
+      - name: Checksum
+        run: sha256sum HOC-Overclocking-Wizard.nro > HOC-Overclocking-Wizard.nro.sha256
+      - name: Publish pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.0-beta.9
+          target_commitish: main
+          name: HOC Overclocking Wizard v0.1.0-beta.9
+          prerelease: true
+          make_latest: false
+          body: |
+            Beta 9 RAM-flow fixes requested from hardware testing.
+            - RAM sweep starts at the bottom of the existing table (2133 MHz) and walks upward automatically.
+            - Compact sweep warning/task text for readability.
+            - Current tested RAM MHz is shown during the stability test.
+            - RAM tuning order corrected to Clock -> Tight/ST -> HP -> DVB -> SoC -> VDD2 -> VDDQ.
+            - Retains beta8 reboot acknowledgement, config SET/ACTIVE display, automatic sweep and recovery behavior.
+            - Chart action controls moved down to avoid covering chart legend text.
+          files: |
+            HOC-Overclocking-Wizard.nro
+            HOC-Overclocking-Wizard.nro.sha256
