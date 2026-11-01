@@ -15,12 +15,12 @@ jobs:
           ref: oc-wizard-beta1
       - name: Pack source tree
         run: |
-          cd ..
-          tar -czf hoc-oc-beta1-source.tar.gz \
+          tar -C .. -czf /tmp/hoc-oc-beta1-source.tar.gz \
             --exclude='HOC-Overclocking-Wizard/.git' \
             HOC-Overclocking-Wizard
+          cp /tmp/hoc-oc-beta1-source.tar.gz ./hoc-oc-beta1-source.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: hoc-oc-beta1-source
-          path: ../hoc-oc-beta1-source.tar.gz
+          path: hoc-oc-beta1-source.tar.gz
           if-no-files-found: error
