@@ -97,6 +97,18 @@ $(OUTPUT).nro : $(OUTPUT).elf
 endif
 $(OUTPUT).elf : $(OFILES)
 
+# Benchmark Toolbox embeds its binary/png resources as generated headers.
+# Ensure every source object waits until bin2o has generated those headers.
+$(OFILES_SRC): $(HFILES_BIN)
+
+%.bin.o %_bin.h : %.bin
+	@echo $(notdir $<)
+	@$(bin2o)
+
+%.png.o %_png.h : %.png
+	@echo $(notdir $<)
+	@$(bin2o)
+
 %.nacp:
 	@nacptool --create "$(APP_TITLE)" "$(APP_AUTHOR)" "$(APP_VERSION)" $@
 -include $(DEPENDS)
