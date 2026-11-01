@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -20,22 +20,17 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Apply beta3 patch
-        run: |
-          cd "$GITHUB_WORKSPACE"
-          python3 tools/patch_beta3.py
-          git -C "$GITHUB_WORKSPACE" config user.name "retrotendo"
-          git -C "$GITHUB_WORKSPACE" config user.email "info@retrotendo.de"
-          git -C "$GITHUB_WORKSPACE" add source/updater.cpp Makefile RELEASE_NOTES_v0.1.0-beta.3.md
-          git -C "$GITHUB_WORKSPACE" commit -m "Fix startup updater socket lifecycle for beta3"
-          git -C "$GITHUB_WORKSPACE" push
+        run: python3 tools/patch_beta3.py
 
       - name: Build
-        run: |
-          cd "$GITHUB_WORKSPACE"
-          make -j2
+        run: make -j2
 
-      - name: Upload NRO
+      - name: Upload beta3 package
         uses: actions/upload-artifact@v4
         with:
           name: HOC-Overclocking-Wizard-beta3
-          path: HOC-Overclocking-Wizard.nro
+          path: |
+            HOC-Overclocking-Wizard.nro
+            source/updater.cpp
+            Makefile
+            RELEASE_NOTES_v0.1.0-beta.3.md
