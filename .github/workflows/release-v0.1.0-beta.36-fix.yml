@@ -1,0 +1,122 @@
+name: Publish v0.1.0-beta.36 fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v0.1.0-beta.36-fix.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build cumulative beta36 source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import textwrap
+          w=Path('.github/workflows/release-v0.1.0-beta.9.yml').read_text()
+          blocks=[];pos=0;marker="          python3 - <<'PY'\n"
+          while True:
+              try:start=w.index(marker,pos)+len(marker)
+              except ValueError:break
+              end=w.index("\n          PY",start);blocks.append(textwrap.dedent(w[start:end]));pos=end+1
+          if len(blocks)!=3:raise SystemExit(f'Expected 3 beta9 blocks, got {len(blocks)}')
+          for i,code in enumerate(blocks):exec(compile(code,f'beta9-{i+1}','exec'))
+          PY
+          python3 .github/scripts/build_beta12_patch.py
+          python3 .github/scripts/build_beta12_fix.py
+          python3 .github/scripts/build_beta13_patch.py
+          python3 .github/scripts/build_beta14_patch.py
+          python3 .github/scripts/build_beta15_patch.py
+          python3 .github/scripts/build_beta16_patch.py
+          python3 .github/scripts/build_beta17_patch.py
+          python3 .github/scripts/build_beta18_patch.py
+          python3 .github/scripts/build_beta19_patch.py
+          python3 .github/scripts/build_beta20_patch.py
+          python3 .github/scripts/build_beta20_fix.py
+          python3 .github/scripts/build_beta21_patch.py
+          python3 .github/scripts/build_beta21_fix.py
+          python3 .github/scripts/build_beta22_patch.py
+          python3 .github/scripts/build_beta23_patch.py
+          python3 .github/scripts/build_beta24_patch.py
+          python3 .github/scripts/build_beta24_fix.py
+          python3 .github/scripts/build_beta25_patch.py
+          python3 .github/scripts/build_beta26_patch.py
+          python3 .github/scripts/build_beta27_patch.py
+          python3 .github/scripts/build_beta27_fix.py
+          python3 .github/scripts/build_beta28_patch.py
+          python3 .github/scripts/build_beta28_ui_patch.py
+          python3 .github/scripts/build_beta29_patch.py
+          python3 .github/scripts/build_beta30_patch.py
+          python3 .github/scripts/build_beta31_patch.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/scripts/build_beta32_patch.py');s=p.read_text()
+          old="'override cleanup retained':'Do not leave the benchmark RAM clock active' in main,"
+          new="'override cleanup retained':'clearOverrides();' in main[main.find('bool runFinalRamBenchmarkPoint'):main.find('void finishFinalRamBenchmarkSweep')],"
+          if old not in s:raise SystemExit('beta32 audit marker missing')
+          p.write_text(s.replace(old,new,1))
+          PY
+          python3 .github/scripts/build_beta32_patch.py
+          python3 .github/scripts/build_beta33_patch.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/scripts/build_beta34_patch.py');s=p.read_text()
+          old="""# Add sweep handling before the existing tuning-stage recovery cases.\nswitch_marker='''    switch(g.stage){\\n        case Stage::RamDvb:'''\nswitch_repl='''    switch(g.stage){\\n        case Stage::RamSweep:\\n            if(g.ramSweepCandidateInProgress){recoverInterruptedRamSweep();return;}\\n            break;\\n        case Stage::RamDvb:'''\nm=must_replace(m,switch_marker,switch_repl,'RamSweep recovery switch case')\n"""
+          new="""# Replace the legacy RamSweep recovery case rather than adding a duplicate.\nold_case='case Stage::RamSweep:clearOverrides();g.testRunning=0;g.testStage=-1;finishRamSweep();return;'\nnew_case='''case Stage::RamSweep:\n            if(g.ramSweepCandidateInProgress){recoverInterruptedRamSweep();return;}\n            clearOverrides();g.testRunning=0;g.testStage=-1;finishRamSweep();return;'''\nif old_case not in m: raise SystemExit('beta34 legacy RamSweep recovery case missing')\nm=m.replace(old_case,new_case,1)\n"""
+          if old not in s:raise SystemExit('beta34 brittle block missing')
+          p.write_text(s.replace(old,new,1))
+          PY
+          python3 .github/scripts/build_beta34_patch.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/scripts/build_beta35_patch.py');s=p.read_text()
+          old="'no retries same next':'HidNpadButton_X' in main[main.find('if(g_ramSweepResumeModal)'):main.find('if(g_recoveryModal)',main.find('if(g_ramSweepResumeModal)'))] and 'runRamSweepAutomatic();' in main[main.find('if(g_ramSweepResumeModal)'):],"
+          new="'no retries same next':'if(k&HidNpadButton_X)' in main and 'g.ramSweepCandidateInProgress=0;g.ramSweepCandidateMHz=0;' in main and 'runRamSweepAutomatic();' in main,"
+          if old not in s:raise SystemExit('beta35 audit marker missing')
+          p.write_text(s.replace(old,new,1))
+          PY
+          python3 .github/scripts/build_beta35_patch.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/scripts/build_beta36_patch.py');s=p.read_text()
+          old="'DVB8 retained':'DVB8 / 66MHz Step Mode' in candidate,"
+          new="'DVB8 retained':'DVB8 / 66MHz Step Mode' in main,"
+          if old not in s:raise SystemExit('beta36 audit marker missing')
+          p.write_text(s.replace(old,new,1))
+          PY
+          python3 .github/scripts/build_beta36_patch.py
+
+      - name: Build NRO
+        run: make -j2
+      - name: Checksum
+        run: sha256sum HOC-Overclocking-Wizard.nro > HOC-Overclocking-Wizard.nro.sha256
+      - name: Publish pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.0-beta.36
+          target_commitish: main
+          name: HOC Overclocking Wizard v0.1.0-beta.36
+          prerelease: true
+          make_latest: false
+          body: |
+            Beta 36 fixes the RAM sweep PASS boundary seen when a completed 3000 MHz test was recovered as only 2933 MHz stable.
+            - Full 60-second zero-error completion is persisted before memtester cleanup/join.
+            - The next clock is not considered active until its own override attempt actually begins.
+            - Active-candidate recovery asks about one frequency only.
+            - Between-candidate interruptions resume without falsely marking the next clock failed.
+            - The recovery popup no longer shows a second Last Stable candidate.
+            - The 1-hour confirmation page shows only the current candidate.
+            - Existing DVB8 baseline, 1-hour confirmation, Beta32 Membench index and downstream RAM tuning are unchanged.
+          files: |
+            HOC-Overclocking-Wizard.nro
+            HOC-Overclocking-Wizard.nro.sha256
