@@ -39,7 +39,6 @@ p.write_text(s)
 
 p=Path('source/main_oc.cpp'); m=p.read_text()
 start,end,block=find_case_block(m,'Choose RAM Target')
-original=block
 
 # Remove the redundant recommendation row from the left content area.
 # Keep any non-UI recommendation logic intact.
@@ -58,19 +57,20 @@ block=''.join(filtered)
 title='Choose your RAM target'
 line1='Use the Left / Right buttons to inspect and'
 line2='select another measured stable RAM point.'
-
-# Replace existing task strings when present.
 block,n1=re.subn(r'v\.instructionTitle\s*=\s*"[^"]*"\s*;',f'v.instructionTitle="{title}";',block,count=1)
 block,n2=re.subn(r'v\.instructionLine1\s*=\s*"[^"]*"\s*;',f'v.instructionLine1="{line1}";',block,count=1)
 block,n3=re.subn(r'v\.instructionLine2\s*=\s*"[^"]*"\s*;',f'v.instructionLine2="{line2}";',block,count=1)
-
-# If this older block had only a title assignment, inject both lines after it.
 if n1==0:
     raise SystemExit('beta51 task title assignment not found in RAM target case')
 if n2==0 or n3==0:
     marker=f'v.instructionTitle="{title}";'
     insert='\n            v.instructionLine1="'+line1+'";\n            v.instructionLine2="'+line2+'";'
     block=block.replace(marker,marker+insert,1)
+
+# The X action returns to the explanation/graph area, so say that explicitly.
+if 'Back to explanation' not in block:
+    raise SystemExit('beta51 back-to-explanation action not found')
+block=block.replace('Back to explanation','Back to explanation and graph',1)
 
 m=m[:start]+block+m[end:]
 p.write_text(m)
@@ -86,6 +86,7 @@ checks={
     'task left right buttons':'Use the Left / Right buttons to inspect and' in target and 'select another measured stable RAM point.' in target,
     'old left right hint removed':'Use Left / Right to inspect' not in target,
     'efficiency row removed':not any(('print(' in ln or 'drawText(' in ln) and ('"Efficiency"' in ln or 'ramEfficiencyRecommendedMHz' in ln) for ln in target.splitlines()),
+    'back action clear':'Back to explanation and graph' in target,
     'selected target retained':'Selected Target' in target,
     'RAM score retained':'RAM Score' in target,
     'SoC retained':'SoC' in target,
