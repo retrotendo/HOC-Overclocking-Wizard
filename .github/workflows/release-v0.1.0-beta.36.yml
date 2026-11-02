@@ -1,0 +1,167 @@
+name: Publish v0.1.0-beta.36
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v0.1.0-beta.36.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply beta9 cumulative base
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import textwrap
+          w=Path('.github/workflows/release-v0.1.0-beta.9.yml').read_text()
+          blocks=[]
+          pos=0
+          marker="          python3 - <<'PY'\n"
+          while True:
+              try:
+                  start=w.index(marker,pos)+len(marker)
+              except ValueError:
+                  break
+              end=w.index("\n          PY",start)
+              blocks.append(textwrap.dedent(w[start:end]))
+              pos=end+1
+          if len(blocks) != 3:
+              raise SystemExit(f'Expected 3 beta9 patch blocks, found {len(blocks)}')
+          for i,code in enumerate(blocks):
+              exec(compile(code,f'beta9-{i+1}','exec'))
+          PY
+
+      - name: Apply beta12 RAM flow
+        run: python3 .github/scripts/build_beta12_patch.py
+      - name: Apply beta12 compile fix
+        run: python3 .github/scripts/build_beta12_fix.py
+      - name: Apply beta13 fixes
+        run: python3 .github/scripts/build_beta13_patch.py
+      - name: Apply beta14 config validation fixes
+        run: python3 .github/scripts/build_beta14_patch.py
+      - name: Apply beta15 benchmark UI and exact-value fixes
+        run: python3 .github/scripts/build_beta15_patch.py
+      - name: Apply beta16 RAM step-mode fix
+        run: python3 .github/scripts/build_beta16_patch.py
+      - name: Apply beta17 fixes
+        run: python3 .github/scripts/build_beta17_patch.py
+      - name: Apply beta18 preparation-validation fix
+        run: python3 .github/scripts/build_beta18_patch.py
+      - name: Apply beta19 charger guard and activity heartbeat
+        run: python3 .github/scripts/build_beta19_patch.py
+      - name: Apply beta20 audible attention reminders
+        run: python3 .github/scripts/build_beta20_patch.py
+      - name: Apply beta20 compile fix
+        run: python3 .github/scripts/build_beta20_fix.py
+      - name: Apply beta21 RAM sweep result and UX cleanup
+        run: python3 .github/scripts/build_beta21_patch.py
+      - name: Apply beta21 final task-card and override cleanup fixes
+        run: python3 .github/scripts/build_beta21_fix.py
+      - name: Apply beta22 per-frequency SoC curve and private test shortcuts
+        run: python3 .github/scripts/build_beta22_patch.py
+      - name: Apply beta23 task-card wording cleanup
+        run: python3 .github/scripts/build_beta23_patch.py
+      - name: Apply beta24 final RAM benchmark flow
+        run: python3 .github/scripts/build_beta24_patch.py
+      - name: Apply beta24 compile fix
+        run: python3 .github/scripts/build_beta24_fix.py
+      - name: Apply beta25 hardware/preparation UI cleanup
+        run: python3 .github/scripts/build_beta25_patch.py
+      - name: Apply beta26 global layout cleanup
+        run: python3 .github/scripts/build_beta26_patch.py
+      - name: Apply beta27 RAM confirmation gate and RAM fail safety
+        run: python3 .github/scripts/build_beta27_patch.py
+      - name: Apply beta27 compile fix
+        run: python3 .github/scripts/build_beta27_fix.py
+      - name: Apply beta28 HOC default reset
+        run: python3 .github/scripts/build_beta28_patch.py
+      - name: Apply beta28 preparation UI and baseline flow
+        run: python3 .github/scripts/build_beta28_ui_patch.py
+      - name: Apply beta29 RAM result and target flow
+        run: python3 .github/scripts/build_beta29_patch.py
+      - name: Apply beta30 all-point RAM line graph and high-end recommendation
+        run: python3 .github/scripts/build_beta30_patch.py
+      - name: Apply beta31 RAM debug data page
+        run: python3 .github/scripts/build_beta31_patch.py
+      - name: Prepare beta32 audit marker
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/scripts/build_beta32_patch.py')
+          s=p.read_text()
+          old="'override cleanup retained':'Do not leave the benchmark RAM clock active' in main,"
+          new="'override cleanup retained':'clearOverrides();' in main[main.find('bool runFinalRamBenchmarkPoint'):main.find('void finishFinalRamBenchmarkSweep')],"
+          if old not in s:
+              raise SystemExit('beta32 audit marker missing')
+          p.write_text(s.replace(old,new,1))
+          PY
+      - name: Apply beta32 full RAM metrics and composite index
+        run: python3 .github/scripts/build_beta32_patch.py
+      - name: Apply beta33 compact RAM preparation summary
+        run: python3 .github/scripts/build_beta33_patch.py
+      - name: Prepare beta34 recovery replacement
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/scripts/build_beta34_patch.py')
+          s=p.read_text()
+          old="""# Add sweep handling before the existing tuning-stage recovery cases.\nswitch_marker='''    switch(g.stage){\\n        case Stage::RamDvb:'''\nswitch_repl='''    switch(g.stage){\\n        case Stage::RamSweep:\\n            if(g.ramSweepCandidateInProgress){recoverInterruptedRamSweep();return;}\\n            break;\\n        case Stage::RamDvb:'''\nm=must_replace(m,switch_marker,switch_repl,'RamSweep recovery switch case')\n"""
+          new="""# Replace the legacy RamSweep recovery case rather than adding a duplicate.\nold_case='case Stage::RamSweep:clearOverrides();g.testRunning=0;g.testStage=-1;finishRamSweep();return;'\nnew_case='''case Stage::RamSweep:\n            if(g.ramSweepCandidateInProgress){recoverInterruptedRamSweep();return;}\n            clearOverrides();g.testRunning=0;g.testStage=-1;finishRamSweep();return;'''\nif old_case not in m: raise SystemExit('beta34 legacy RamSweep recovery case missing')\nm=m.replace(old_case,new_case,1)\n"""
+          if old not in s:
+              raise SystemExit('beta34 brittle switch block missing')
+          p.write_text(s.replace(old,new,1))
+          PY
+      - name: Apply beta34 crash-safe RAM sweep recovery
+        run: python3 .github/scripts/build_beta34_patch.py
+      - name: Prepare beta35 audit range
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/scripts/build_beta35_patch.py')
+          s=p.read_text()
+          old="'no retries same next':'HidNpadButton_X' in main[main.find('if(g_ramSweepResumeModal)'):main.find('if(g_recoveryModal)',main.find('if(g_ramSweepResumeModal)'))] and 'runRamSweepAutomatic();' in main[main.find('if(g_ramSweepResumeModal)'):],"
+          new="'no retries same next':'if(k&HidNpadButton_X)' in main and 'g.ramSweepCandidateInProgress=0;g.ramSweepCandidateMHz=0;' in main and 'runRamSweepAutomatic();' in main,"
+          if old not in s:
+              raise SystemExit('beta35 audit marker missing')
+          p.write_text(s.replace(old,new,1))
+          PY
+      - name: Apply beta35 explicit RAM sweep resume prompt and commit gap
+        run: python3 .github/scripts/build_beta35_patch.py
+      - name: Apply beta36 pre-cleanup RAM PASS checkpoint
+        run: python3 .github/scripts/build_beta36_patch.py
+
+      - name: Build NRO
+        run: make -j2
+      - name: Checksum
+        run: sha256sum HOC-Overclocking-Wizard.nro > HOC-Overclocking-Wizard.nro.sha256
+      - name: Publish pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.0-beta.36
+          target_commitish: main
+          name: HOC Overclocking Wizard v0.1.0-beta.36
+          prerelease: true
+          make_latest: false
+          body: |
+            Beta 36 fixes the RAM sweep PASS boundary that could make a completed 3000 MHz test fall back to 2933 MHz after a freeze.
+            - When a RAM sweep reaches its full 60-second duration with zero detected errors, that provisional PASS is persisted before memtester worker cleanup/join.
+            - The display is updated to the completed duration before cleanup.
+            - The persistent sweep cursor advances to the next RAM clock, but that next clock is not marked active until the Wizard actually starts applying it.
+            - A freeze while an actual RAM candidate is active produces a simple one-frequency question such as "Did RAM 3066 MHz freeze/crash?".
+            - An interruption between candidates can only resume the next clock and cannot falsely mark it failed.
+            - The previous "Last completed stable" line is removed from the recovery popup.
+            - The 1-hour confirmation page now shows only the current RAM candidate, without rejected/previous candidate text.
+            - Beta35 recovery/session handling, Beta34 exact-candidate journal, Beta32 full Membench metrics/index and all downstream RAM tuning remain intact.
+          files: |
+            HOC-Overclocking-Wizard.nro
+            HOC-Overclocking-Wizard.nro.sha256
