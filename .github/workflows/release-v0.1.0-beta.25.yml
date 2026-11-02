@@ -1,5 +1,5 @@
 name: Publish v0.1.0-beta.25
-# retry after audit fix
+# retry with current baseline action
 
 on:
   push:
@@ -76,7 +76,7 @@ jobs:
         run: python3 .github/scripts/build_beta24_patch.py
       - name: Apply beta24 compile fix
         run: python3 .github/scripts/build_beta24_fix.py
-      - name: Apply beta25 hardware detection UI cleanup
+      - name: Apply beta25 hardware/preparation UI cleanup
         run: python3 .github/scripts/build_beta25_patch.py
 
       - name: Build NRO
@@ -92,9 +92,12 @@ jobs:
           prerelease: true
           make_latest: false
           body: |
-            Beta 25 contains two Hardware Detection UI cleanups only.
-            - ACTUAL ACTIVE VALUES now shows SoC Max Voltage from the HOC config instead of the current SoC table-point voltage.
+            Beta 25 contains Hardware Detection and RAM Preparation UI cleanup.
+            - ACTUAL ACTIVE VALUES on Hardware Detection now shows SoC Max Voltage from the HOC config instead of the current SoC table-point voltage.
             - Once hardware is detected, YOUR TASK shows only Continue; the redundant review text/action hint is removed.
+            - RAM Preparation now exposes X: Use current values as baseline.
+            - The X action snapshots the complete current HOC RAM config as the Wizard baseline without modifying it; later config guards compare against that saved baseline.
+            - A/Y continue to use the recommended preparation baseline with DVB Shift 8.
             - Beta24 RAM methodology, final benchmark sweep, spinner-only activity indicator, charger guard, audio reminders and private force PASS/FAIL shortcuts remain unchanged.
           files: |
             HOC-Overclocking-Wizard.nro
