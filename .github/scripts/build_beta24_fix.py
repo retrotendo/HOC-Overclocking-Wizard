@@ -2,7 +2,7 @@ from pathlib import Path
 
 p=Path('source/main_oc.cpp')
 s=p.read_text()
-marker='void render(){'
+marker='void render() {'
 if marker not in s:
     raise SystemExit('beta24-fix render marker missing')
 protos='''int socTableForRamMHz(int ramMHz);\nint nextRamBenchmarkPoint(int from);\n\n'''
@@ -11,7 +11,7 @@ if 'int nextRamBenchmarkPoint(int from);' not in s:
 p.write_text(s)
 
 main=p.read_text()
-render_pos=main.find('void render(){')
+render_pos=main.find('void render() {')
 checks={
     'SoC helper declared before render':0 <= main.find('int socTableForRamMHz(int ramMHz);') < render_pos,
     'benchmark helper declared before render':0 <= main.find('int nextRamBenchmarkPoint(int from);') < render_pos,
