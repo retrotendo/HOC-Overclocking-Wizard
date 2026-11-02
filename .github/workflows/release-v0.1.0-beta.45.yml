@@ -1,0 +1,60 @@
+name: Publish v0.1.0-beta.45
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v0.1.0-beta.45.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build cumulative beta45 source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, textwrap
+          w=Path('.github/workflows/release-v0.1.0-beta.44.yml').read_text()
+          anchor='      - name: Build cumulative beta44 source\n'
+          start=w.index(anchor)
+          runpos=w.index('        run: |\n',start)+len('        run: |\n')
+          end=w.index('\n      - name: Build NRO',runpos)
+          script=textwrap.dedent(w[runpos:end])
+          Path('/tmp/build_beta44_source.sh').write_text(script)
+          subprocess.run(['bash','-e','-u','-o','pipefail','/tmp/build_beta44_source.sh'],check=True)
+          PY
+          python3 .github/scripts/build_beta45_patch.py
+
+      - name: Build NRO
+        run: make -j2
+      - name: Checksum
+        run: sha256sum HOC-Overclocking-Wizard.nro > HOC-Overclocking-Wizard.nro.sha256
+      - name: Publish pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.0-beta.45
+          target_commitish: main
+          name: HOC Overclocking Wizard v0.1.0-beta.45
+          prerelease: true
+          make_latest: false
+          body: |
+            Beta 45 changes only the user-facing RAM performance presentation.
+            - The internal measured composite index and both Efficiency/Performance recommendation algorithms are unchanged.
+            - The visible green RAM Performance series is rebased to the measured tuning range: lowest measured RAM point = 0%, best measured point = 100%.
+            - This makes the result curve show the amount of measured RAM tuning progress instead of compressing the whole curve into roughly 94-100%.
+            - The selected-point readout and target-selection page use the same displayed RAM Performance percentage.
+            - The green legend is renamed to `RAM Performance`.
+            - Beta44 Switch-like point controls, expanded recommendation text and hidden ZL+ZR+Plus RAM Debug remain unchanged.
+            - Raw Membench data, recommendation logic, recovery, DVB8 baseline and downstream VDD2/VDDQ tuning are unchanged.
+          files: |
+            HOC-Overclocking-Wizard.nro
+            HOC-Overclocking-Wizard.nro.sha256
