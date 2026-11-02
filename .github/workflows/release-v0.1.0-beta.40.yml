@@ -1,0 +1,61 @@
+name: Publish v0.1.0-beta.40
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v0.1.0-beta.40.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build cumulative beta40 source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, textwrap
+          w=Path('.github/workflows/release-v0.1.0-beta.39.yml').read_text()
+          anchor='      - name: Build cumulative beta39 source\n'
+          start=w.index(anchor)
+          runpos=w.index('        run: |\n',start)+len('        run: |\n')
+          end=w.index('\n      - name: Build NRO',runpos)
+          script=textwrap.dedent(w[runpos:end])
+          Path('/tmp/build_beta39_source.sh').write_text(script)
+          subprocess.run(['bash','-e','-u','-o','pipefail','/tmp/build_beta39_source.sh'],check=True)
+          PY
+          python3 .github/scripts/build_beta40_patch.py
+
+      - name: Build NRO
+        run: make -j2
+      - name: Checksum
+        run: sha256sum HOC-Overclocking-Wizard.nro > HOC-Overclocking-Wizard.nro.sha256
+      - name: Publish pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.0-beta.40
+          target_commitish: main
+          name: HOC Overclocking Wizard v0.1.0-beta.40
+          prerelease: true
+          make_latest: false
+          body: |
+            Beta 40 adds two separate RAM target recommendations from the same measured curve.
+            - Efficiency Recommendation scans the upper useful RAM range for the first clear electrical knee and gives SoC voltage cost more weight while still requiring strong measured performance.
+            - Performance Recommendation keeps the Beta39 top-down model and stays closer to Stable Max unless the final voltage cost is no longer justified by measured performance return.
+            - Stable Max remains shown separately and can still be selected manually.
+            - The target selector marks points as `[ EFFICIENCY ]`, `[ PERFORMANCE ]`, `[ STABLE MAX ]`, or combined roles when they coincide.
+            - The RAM graph now marks Efficiency as `EFF` and Performance as `PERF`, and shows both recommendations plus Stable Max in its summary.
+            - The mandatory explanation now makes clear that the selected target becomes the profile's maximum tuned RAM clock and that VDD2/VDDQ are optimized for that target; higher clocks are not validated after choosing a lower target.
+            - The measured debug curve is used only as a build-time sanity test and resolves dynamically to Efficiency 2733 MHz / Performance 2933 MHz / Stable Max 3000 MHz; no target frequency is hardcoded in runtime logic.
+            - Manual Left/Right target selection, Beta32 full Membench index, Beta37 sweep transition/recovery, Beta38 confirmation UI, DVB8 baseline and downstream tuning remain unchanged.
+          files: |
+            HOC-Overclocking-Wizard.nro
+            HOC-Overclocking-Wizard.nro.sha256
