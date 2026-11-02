@@ -1,0 +1,60 @@
+name: Publish v0.1.0-beta.44
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v0.1.0-beta.44.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build cumulative beta44 source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, textwrap
+          w=Path('.github/workflows/release-v0.1.0-beta.43.yml').read_text()
+          anchor='      - name: Build cumulative beta43 source\n'
+          start=w.index(anchor)
+          runpos=w.index('        run: |\n',start)+len('        run: |\n')
+          end=w.index('\n      - name: Build NRO',runpos)
+          script=textwrap.dedent(w[runpos:end])
+          Path('/tmp/build_beta43_source.sh').write_text(script)
+          subprocess.run(['bash','-e','-u','-o','pipefail','/tmp/build_beta43_source.sh'],check=True)
+          PY
+          python3 .github/scripts/build_beta44_patch.py
+
+      - name: Build NRO
+        run: make -j2
+      - name: Checksum
+        run: sha256sum HOC-Overclocking-Wizard.nro > HOC-Overclocking-Wizard.nro.sha256
+      - name: Publish pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.0-beta.44
+          target_commitish: main
+          name: HOC Overclocking Wizard v0.1.0-beta.44
+          prerelease: true
+          make_latest: false
+          body: |
+            Beta 44 cleans up the RAM Benchmark Result controls without changing tuning logic.
+            - The redundant `RAM performance and SoC voltage` chart-title text is removed.
+            - Point browsing moves into that space as a compact Switch-like four-button directional cluster; only Left/Right are marked and active.
+            - Recommendation text is written out as `Recommended for: Efficiency ... | Performance ...` in the selected-point row.
+            - Beta43 Efficiency/Performance recommendation algorithms are unchanged.
+            - The measured RAM Performance Index is unchanged: 35% GPU bandwidth group, 35% CPU bandwidth group, 25% Full-RAM latency and 5% L2 latency, normalized to the best measured point.
+            - Hidden RAM Debug remains available with ZL + ZR + Plus; B returns to the graph.
+            - Recovery, DVB8 baseline and downstream VDD2/VDDQ tuning remain unchanged.
+          files: |
+            HOC-Overclocking-Wizard.nro
+            HOC-Overclocking-Wizard.nro.sha256
