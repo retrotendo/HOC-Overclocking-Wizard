@@ -23,16 +23,20 @@ old_safe='''            m.primaryAction="A  Continue with "+std::to_string(candi
 new_safe='''            m.primaryAction="Continue with "+std::to_string(candidate)+" MHz";\n            m.tertiaryAction.clear();\n            m.secondaryAction.clear();'''
 m=must_replace(m,old_safe,new_safe,'safe handoff resume action')
 
-# The dedicated RAM sweep resume dialog no longer has a B/Exit path.
-old_b='''            if(k&HidNpadButton_B){saveState();break;}\n            continue;\n        }'''
-new_b='''            continue;\n        }'''
-# Restrict replacement to the explicit resume handler region so generic B/Exit remains elsewhere.
-rs=m.find('if(g_ramSweepResumeModal){', m.find('while(appletMainLoop())'))
-re=m.find('if(g_recoveryModal)', rs)
+# Remove B/Exit only from the dedicated RAM resume input handler. Generic B/Exit
+# behavior everywhere else remains untouched.
+search_from=m.find('while(appletMainLoop())')
+rs=m.find('if(g_ramSweepResumeModal){', search_from)
+while rs>=0:
+    re=m.find('if(g_recoveryModal)', rs)
+    if re>rs and 'HidNpadButton_X' in m[rs:re]:
+        break
+    rs=m.find('if(g_ramSweepResumeModal){', rs+1)
 if rs<0 or re<0:
     raise SystemExit('beta41 marker missing: RAM resume input region')
 region=m[rs:re]
-region=must_replace(region,old_b,new_b,'RAM resume B exit removal')
+b_target='if(k&HidNpadButton_B){saveState();break;}'
+region=must_replace(region,b_target,'','RAM resume B exit removal')
 m=m[:rs]+region+m[re:]
 p.write_text(m)
 
@@ -46,14 +50,21 @@ p.write_text(g)
 
 # Audit
 main=Path('source/main_oc.cpp').read_text(); gui=Path('source/gui_console.cpp').read_text(); stress=Path('source/stress_tests.cpp').read_text(); eng=Path('source/oc_engine.cpp').read_text()
-rs=main.find('if(g_ramSweepResumeModal){', main.find('while(appletMainLoop())'))
-re=main.find('if(g_recoveryModal)', rs)
+rs=-1; re=-1; pos=0
+while True:
+    pos=main.find('if(g_ramSweepResumeModal){',pos)
+    if pos<0: break
+    end=main.find('if(g_recoveryModal)',pos)
+    if end>pos and 'HidNpadButton_X' in main[pos:end]:
+        rs,re=pos,end;break
+    pos+=1
 resume_input=main[rs:re] if rs>=0 and re>=0 else ''
 checks={
     'beta41 version':'0.1.0-beta.41' in Path('Makefile').read_text(),
     'active yes action':'m.primaryAction="YES - mark "+std::to_string(candidate)+" MHz failed"' in main,
     'active no action':'m.tertiaryAction="NO - retry "+std::to_string(candidate)+" MHz"' in main,
     'active no B action':'m.secondaryAction.clear();' in main[main.find('if(g.ramSweepCandidateInProgress)'):main.find('m.tone=gui::ModalTone::Amber',main.find('if(g.ramSweepCandidateInProgress)'))],
+    'resume input found':bool(resume_input),
     'resume B exit removed':'HidNpadButton_B' not in resume_input,
     'A fail behavior retained':'recoverInterruptedRamSweep();' in resume_input,
     'X retry behavior retained':'HidNpadButton_X' in resume_input and 'runRamSweepAutomatic();' in resume_input,
