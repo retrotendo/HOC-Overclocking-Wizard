@@ -1,0 +1,61 @@
+name: Publish v0.1.0-beta.39
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v0.1.0-beta.39.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build cumulative beta39 source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, textwrap
+          w=Path('.github/workflows/release-v0.1.0-beta.38.yml').read_text()
+          anchor='      - name: Build cumulative beta38 source\n'
+          start=w.index(anchor)
+          runpos=w.index('        run: |\n',start)+len('        run: |\n')
+          end=w.index('\n      - name: Build NRO',runpos)
+          script=textwrap.dedent(w[runpos:end])
+          Path('/tmp/build_beta38_source.sh').write_text(script)
+          subprocess.run(['bash','-e','-u','-o','pipefail','/tmp/build_beta38_source.sh'],check=True)
+          PY
+          python3 .github/scripts/build_beta39_patch.py
+
+      - name: Build NRO
+        run: make -j2
+      - name: Checksum
+        run: sha256sum HOC-Overclocking-Wizard.nro > HOC-Overclocking-Wizard.nro.sha256
+      - name: Publish pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.0-beta.39
+          target_commitish: main
+          name: HOC Overclocking Wizard v0.1.0-beta.39
+          prerelease: true
+          make_latest: false
+          body: |
+            Beta 39 replaces the RAM target recommendation with a top-down marginal performance/cost model based on the final measured curve.
+            - The recommendation starts at confirmed Stable Max and evaluates only the transition into the current high-end candidate.
+            - Electrical cost is normalized as additional SoC mV per 100 MHz and compared with the recent lower steps on the same console.
+            - Performance remains part of the decision: measured Performance Index gain per 100 MHz and performance gain per added mV are compared with the same local history.
+            - A high-end point is backed off only when its voltage cost is a clear local outlier and its measured performance return is not exceptional.
+            - The evaluation repeats top-down until the marginal step returns to the local trend; if no upper knee exists, Stable Max remains recommended.
+            - The user's captured debug curve is included as a build-time sanity test and resolves to 2933 MHz without hardcoding that frequency in runtime logic.
+            - The RAM performance + SoC graph remains unchanged and the target selector now highlights the automatic target with `[ RECOMMENDED ]`.
+            - Manual Left/Right target selection, mandatory explanation, Beta37 sweep transition/recovery, Beta38 confirmation UI, DVB8 baseline and all downstream tuning remain unchanged.
+          files: |
+            HOC-Overclocking-Wizard.nro
+            HOC-Overclocking-Wizard.nro.sha256
