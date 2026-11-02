@@ -1,0 +1,60 @@
+name: Publish v0.1.0-beta.53
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v0.1.0-beta.53.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build cumulative beta53 source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, textwrap
+          w=Path('.github/workflows/release-v0.1.0-beta.52.yml').read_text()
+          anchor='      - name: Build cumulative beta52 source\n'
+          start=w.index(anchor)
+          runpos=w.index('        run: |\n',start)+len('        run: |\n')
+          end=w.index('\n      - name: Build NRO',runpos)
+          script=textwrap.dedent(w[runpos:end])
+          Path('/tmp/build_beta52_source.sh').write_text(script)
+          subprocess.run(['bash','-e','-u','-o','pipefail','/tmp/build_beta52_source.sh'],check=True)
+          PY
+          python3 .github/scripts/build_beta53_patch.py
+
+      - name: Build NRO
+        run: make -j2
+      - name: Checksum
+        run: sha256sum HOC-Overclocking-Wizard.nro > HOC-Overclocking-Wizard.nro.sha256
+      - name: Publish pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.0-beta.53
+          target_commitish: main
+          name: HOC Overclocking Wizard v0.1.0-beta.53
+          prerelease: true
+          make_latest: false
+          body: |
+            Beta 53 fixes the RAM target explanation and task copy.
+            - Splits Choosing Your RAM Target into two full-width pages so the complete explanation is visible.
+            - A advances from page 1 to page 2, then continues to RAM Target Selection.
+            - X goes to the previous explanation page, then back to the graph.
+            - Restores the full Efficiency, Performance, profile-maximum, VDD2/VDDQ and higher-clock warning text.
+            - Shortens the RAM target task box to fixed readable lines: "Use the Left / Right buttons" / "to inspect a stable RAM point."
+            - Keeps "Back to explanation and graph" on the selection page.
+            - RAM Score, Efficiency/Performance recommendation logic, graph, hidden debug, recovery, DVB8 baseline and downstream tuning logic are unchanged.
+          files: |
+            HOC-Overclocking-Wizard.nro
+            HOC-Overclocking-Wizard.nro.sha256
