@@ -20,6 +20,7 @@ jobs:
       - name: Build cumulative beta41 source
         shell: bash
         run: |
+          # Retry after beta41 RAM resume input marker correction.
           python3 - <<'PY'
           from pathlib import Path
           import subprocess, textwrap
