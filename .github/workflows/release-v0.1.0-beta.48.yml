@@ -1,0 +1,60 @@
+name: Publish v0.1.0-beta.48
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v0.1.0-beta.48.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build cumulative beta48 source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, textwrap
+          w=Path('.github/workflows/release-v0.1.0-beta.47.yml').read_text()
+          anchor='      - name: Build cumulative beta47 source\n'
+          start=w.index(anchor)
+          runpos=w.index('        run: |\n',start)+len('        run: |\n')
+          end=w.index('\n      - name: Build NRO',runpos)
+          script=textwrap.dedent(w[runpos:end])
+          Path('/tmp/build_beta47_source.sh').write_text(script)
+          subprocess.run(['bash','-e','-u','-o','pipefail','/tmp/build_beta47_source.sh'],check=True)
+          PY
+          python3 .github/scripts/build_beta48_patch.py
+
+      - name: Build NRO
+        run: make -j2
+      - name: Checksum
+        run: sha256sum HOC-Overclocking-Wizard.nro > HOC-Overclocking-Wizard.nro.sha256
+      - name: Publish pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.0-beta.48
+          target_commitish: main
+          name: HOC Overclocking Wizard v0.1.0-beta.48
+          prerelease: true
+          make_latest: false
+          body: |
+            Beta 48 improves RAM result readability and removes the duplicate graph action without changing tuning logic.
+            - Point inspection control is now a tiny round four-button cluster matching the user's reference: four small circles in a cross, only Left/Right marked.
+            - The control remains in the free graph header area and no longer uses the bulky elongated beta47 pads.
+            - Graph text is larger: RAM Score / SoC legend, MHz labels, EFF/PERF/MAX markers, selected-point details and recommendation text.
+            - Selected-point details and `Recommended for: Efficiency ... | Performance ...` are both enlarged to 14 px.
+            - Duplicate `X : Show explanation` action is removed from the RAM result page; A alone continues to the mandatory explanation, B remains Exit.
+            - The benchmark-derived RAM Score from beta47 is unchanged.
+            - Efficiency/Performance recommendation algorithms, hidden RAM Debug, recovery, DVB8 baseline and downstream VDD2/VDDQ tuning are unchanged.
+          files: |
+            HOC-Overclocking-Wizard.nro
+            HOC-Overclocking-Wizard.nro.sha256
