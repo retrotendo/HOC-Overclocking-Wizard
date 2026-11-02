@@ -20,6 +20,7 @@ jobs:
       - name: Build cumulative beta48 source
         shell: bash
         run: |
+          # Retry uses corrected graph-marker patching while preserving beta47 logic.
           python3 - <<'PY'
           from pathlib import Path
           import subprocess, textwrap
