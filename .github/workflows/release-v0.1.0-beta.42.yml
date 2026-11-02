@@ -1,0 +1,60 @@
+name: Publish v0.1.0-beta.42
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v0.1.0-beta.42.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build cumulative beta42 source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, textwrap
+          w=Path('.github/workflows/release-v0.1.0-beta.41.yml').read_text()
+          anchor='      - name: Build cumulative beta41 source\n'
+          start=w.index(anchor)
+          runpos=w.index('        run: |\n',start)+len('        run: |\n')
+          end=w.index('\n      - name: Build NRO',runpos)
+          script=textwrap.dedent(w[runpos:end])
+          Path('/tmp/build_beta41_source.sh').write_text(script)
+          subprocess.run(['bash','-e','-u','-o','pipefail','/tmp/build_beta41_source.sh'],check=True)
+          PY
+          python3 .github/scripts/build_beta42_patch.py
+
+      - name: Build NRO
+        run: make -j2
+      - name: Checksum
+        run: sha256sum HOC-Overclocking-Wizard.nro > HOC-Overclocking-Wizard.nro.sha256
+      - name: Publish pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.0-beta.42
+          target_commitish: main
+          name: HOC Overclocking Wizard v0.1.0-beta.42
+          prerelease: true
+          make_latest: false
+          body: |
+            Beta 42 cleans up the RAM Benchmark Result screen now that the RAM debug capture phase is complete.
+            - The temporary `Y : Debug data` entry point is removed from the normal Wizard UI.
+            - Raw Membench measurements remain stored and continue to feed the Beta32 Performance Index and both recommendation algorithms.
+            - Efficiency Recommendation, Performance Recommendation and Stable Max are now shown as a dedicated always-visible line above the RAM graph.
+            - The graph legend now includes `Left / Right: inspect points` so point navigation is discoverable.
+            - The graph is lifted and shortened slightly so the MHz axis labels and selected-point detail stay clear of the action buttons.
+            - EFF / PERF / MAX point markers remain on the graph.
+            - Beta40 recommendation algorithms, Beta41 two-choice RAM recovery, mandatory target explanation, DVB8 baseline and downstream VDD2/VDDQ tuning are unchanged.
+          files: |
+            HOC-Overclocking-Wizard.nro
+            HOC-Overclocking-Wizard.nro.sha256
