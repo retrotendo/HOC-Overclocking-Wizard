@@ -56,7 +56,7 @@ checks={
     'hardware SoC VMAX label':'setValue(1,"SoC Max Voltage"' in hw,
     'hardware SoC VMAX config value':'std::to_string(rc.socVmaxMv)+" mV"' in hw,
     'old hardware SoC point removed':'setValue(1,"SoC",' not in hw,
-    'beta24 benchmark flow retained':'Stage::RamBenchmark' in main and 'runRamBenchmarkSweep' in main,
+    'beta24 benchmark flow retained':'Stage::RamBenchmark' in main and 'Final RAM Benchmark Sweep' in main,
     'beta22 force shortcuts retained':'HidNpadButton_Plus' in Path('source/stress_tests.cpp').read_text() and 'HidNpadButton_Minus' in Path('source/stress_tests.cpp').read_text(),
 }
 for name,ok in checks.items(): print(('PASS ' if ok else 'FAIL ')+name)
