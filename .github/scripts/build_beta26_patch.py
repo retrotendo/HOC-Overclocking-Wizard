@@ -91,7 +91,7 @@ checks={
     'global value-row breathing room':'by += 40;' in gui,
     'global numbered-row breathing room':'by += 31;' in gui,
     'global heading breathing room':'by += 34;' in gui,
-    'beta25 current baseline retained':'Use current values as baseline' in main and 'baselineCustom' in main,
+    'beta25 current baseline retained':'Use current values as baseline' in main and 'ramUseCurrentBaseline' in main,
     'beta24 benchmark stage retained':'RamBenchmark' in main,
     'beta22 force shortcuts retained':'HidNpadButton_Plus' in Path('source/stress_tests.cpp').read_text() and 'HidNpadButton_Minus' in Path('source/stress_tests.cpp').read_text(),
 }
