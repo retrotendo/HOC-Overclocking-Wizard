@@ -109,6 +109,18 @@ jobs:
         run: python3 .github/scripts/build_beta32_patch.py
       - name: Apply beta33 compact RAM preparation summary
         run: python3 .github/scripts/build_beta33_patch.py
+      - name: Prepare beta34 recovery insertion
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/scripts/build_beta34_patch.py')
+          s=p.read_text()
+          old="""# Add sweep handling before the existing tuning-stage recovery cases.\nswitch_marker='''    switch(g.stage){\\n        case Stage::RamDvb:'''\nswitch_repl='''    switch(g.stage){\\n        case Stage::RamSweep:\\n            if(g.ramSweepCandidateInProgress){recoverInterruptedRamSweep();return;}\\n            break;\\n        case Stage::RamDvb:'''\nm=must_replace(m,switch_marker,switch_repl,'RamSweep recovery switch case')\n"""
+          new="""# Add sweep handling at the start of recoverInterrupted() regardless of\n# formatting/order of the older recovery cases.\nrecover_pos=m.find('void recoverInterrupted(){')\nif recover_pos<0: raise SystemExit('beta34 recoverInterrupted missing')\nswitch_pos=m.find('switch(g.stage)',recover_pos)\nif switch_pos<0: raise SystemExit('beta34 recovery switch missing')\nswitch_brace=m.find('{',switch_pos)\nif switch_brace<0: raise SystemExit('beta34 recovery switch brace missing')\ninsert='\\n        case Stage::RamSweep:\\n            if(g.ramSweepCandidateInProgress){recoverInterruptedRamSweep();return;}\\n            break;'\nm=m[:switch_brace+1]+insert+m[switch_brace+1:]\n"""
+          if old not in s:
+              raise SystemExit('beta34 brittle switch block missing')
+          p.write_text(s.replace(old,new,1))
+          PY
       - name: Apply beta34 crash-safe RAM sweep recovery
         run: python3 .github/scripts/build_beta34_patch.py
 
