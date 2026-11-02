@@ -109,14 +109,14 @@ jobs:
         run: python3 .github/scripts/build_beta32_patch.py
       - name: Apply beta33 compact RAM preparation summary
         run: python3 .github/scripts/build_beta33_patch.py
-      - name: Prepare beta34 recovery insertion
+      - name: Prepare beta34 recovery replacement
         run: |
           python3 - <<'PY'
           from pathlib import Path
           p=Path('.github/scripts/build_beta34_patch.py')
           s=p.read_text()
           old="""# Add sweep handling before the existing tuning-stage recovery cases.\nswitch_marker='''    switch(g.stage){\\n        case Stage::RamDvb:'''\nswitch_repl='''    switch(g.stage){\\n        case Stage::RamSweep:\\n            if(g.ramSweepCandidateInProgress){recoverInterruptedRamSweep();return;}\\n            break;\\n        case Stage::RamDvb:'''\nm=must_replace(m,switch_marker,switch_repl,'RamSweep recovery switch case')\n"""
-          new="""# Add sweep handling at the start of recoverInterrupted() regardless of\n# formatting/order of the older recovery cases.\nrecover_pos=m.find('void recoverInterrupted(){')\nif recover_pos<0: raise SystemExit('beta34 recoverInterrupted missing')\nswitch_pos=m.find('switch(g.stage)',recover_pos)\nif switch_pos<0: raise SystemExit('beta34 recovery switch missing')\nswitch_brace=m.find('{',switch_pos)\nif switch_brace<0: raise SystemExit('beta34 recovery switch brace missing')\ninsert='\\n        case Stage::RamSweep:\\n            if(g.ramSweepCandidateInProgress){recoverInterruptedRamSweep();return;}\\n            break;'\nm=m[:switch_brace+1]+insert+m[switch_brace+1:]\n"""
+          new="""# Replace the legacy RamSweep recovery case rather than adding a duplicate.\nold_case='case Stage::RamSweep:clearOverrides();g.testRunning=0;g.testStage=-1;finishRamSweep();return;'\nnew_case='''case Stage::RamSweep:\n            if(g.ramSweepCandidateInProgress){recoverInterruptedRamSweep();return;}\n            clearOverrides();g.testRunning=0;g.testStage=-1;finishRamSweep();return;'''\nif old_case not in m: raise SystemExit('beta34 legacy RamSweep recovery case missing')\nm=m.replace(old_case,new_case,1)\n"""
           if old not in s:
               raise SystemExit('beta34 brittle switch block missing')
           p.write_text(s.replace(old,new,1))
@@ -143,6 +143,7 @@ jobs:
             - After reboot, the Wizard shows an Interrupted RAM Sweep recovery prompt naming the exact MHz candidate that did not complete.
             - Recovering marks that candidate as failed, invalidates stale measurements at or above it, restores the last fully completed stable RAM point and ends the sweep.
             - The Wizard can no longer advance to a higher RAM clock after a hard crash. Example: a crash at 3000 MHz cannot resume at 3066 MHz.
+            - Legacy interrupted-test states remain recoverable if they only contain the older testRunning marker.
             - Normal cancel, charger-loss and technical-return paths remain retryable and do not become false stability failures.
             - Beta33 Preparation UI, Beta32 full Membench capture/index, 1-hour RAM confirmation, graph/target flow and override cleanup remain unchanged.
           files: |
