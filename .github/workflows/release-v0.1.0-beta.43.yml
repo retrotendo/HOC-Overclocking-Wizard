@@ -1,0 +1,61 @@
+name: Publish v0.1.0-beta.43
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v0.1.0-beta.43.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build cumulative beta43 source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, textwrap
+          w=Path('.github/workflows/release-v0.1.0-beta.42.yml').read_text()
+          anchor='      - name: Build cumulative beta42 source\n'
+          start=w.index(anchor)
+          runpos=w.index('        run: |\n',start)+len('        run: |\n')
+          end=w.index('\n      - name: Build NRO',runpos)
+          script=textwrap.dedent(w[runpos:end])
+          Path('/tmp/build_beta42_source.sh').write_text(script)
+          subprocess.run(['bash','-e','-u','-o','pipefail','/tmp/build_beta42_source.sh'],check=True)
+          PY
+          python3 .github/scripts/build_beta43_patch.py
+
+      - name: Build NRO
+        run: make -j2
+      - name: Checksum
+        run: sha256sum HOC-Overclocking-Wizard.nro > HOC-Overclocking-Wizard.nro.sha256
+      - name: Publish pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.0-beta.43
+          target_commitish: main
+          name: HOC Overclocking Wizard v0.1.0-beta.43
+          prerelease: true
+          make_latest: false
+          body: |
+            Beta 43 refines the RAM recommendation model and result graph.
+            - Performance Recommendation is now strictly top-down from Stable Max and rejects only clearly steep final voltage steps with poor measured performance return.
+            - Efficiency Recommendation scans upward through the upper useful range and stops before the first clear electrical knee; later cheap steps do not erase that efficiency boundary.
+            - Current measured-curve build sanity resolves dynamically to Efficiency 2733 MHz and Performance 2933 MHz; no runtime frequency is hardcoded.
+            - Recommendation values move to the far right of the selected-point detail row as `EFF` and `PERF`; Stable Max remains represented by the MAX marker only.
+            - The standalone right-edge `MHz` label is removed so it no longer collides with the 3000 MHz point.
+            - Point browsing is made more visible with two small left/right arrow buttons and `Inspect points` on the chart-title row.
+            - RAM Debug remains hidden from normal UI but can be opened from the RAM result graph with ZL + ZR + Plus. B returns to the RAM graph.
+            - Raw Membench data, Beta41 recovery, mandatory explanation, DVB8 baseline and downstream VDD2/VDDQ tuning remain unchanged.
+          files: |
+            HOC-Overclocking-Wizard.nro
+            HOC-Overclocking-Wizard.nro.sha256
