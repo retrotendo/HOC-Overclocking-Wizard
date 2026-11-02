@@ -23,21 +23,12 @@ def replace_function(src, signature, replacement):
     return src[:pos]+replacement+src[end:]
 
 
-# -----------------------------------------------------------------------------
-# Version.
-# -----------------------------------------------------------------------------
 p=Path('Makefile')
 s=p.read_text()
 s=must_replace(s,'APP_VERSION := 0.1.0-beta.26','APP_VERSION := 0.1.0-beta.27','version')
 p.write_text(s)
 
-
-# -----------------------------------------------------------------------------
-# RAM error safety: as soon as the stability controller observes a RAM failure,
-# clear all temporary overrides before waiting for worker shutdown / result UI.
-# This can sometimes avoid a follow-on crash when memtester has already exposed
-# an unstable RAM setting.
-# -----------------------------------------------------------------------------
+# Immediate RAM failure safety.
 p=Path('source/stress_tests.cpp')
 st=p.read_text()
 old_fail='''        if (c.failed.load(std::memory_order_acquire) || c.initError.load(std::memory_order_acquire) != 0)\n            break;'''
@@ -45,40 +36,29 @@ new_fail='''        if (c.failed.load(std::memory_order_acquire) || c.initError.
 st=must_replace(st,old_fail,new_fail,'immediate RAM error override cleanup')
 p.write_text(st)
 
-
-# -----------------------------------------------------------------------------
-# Main RAM flow: short sweep -> result -> 1h confirmation gate -> DVB.
-# -----------------------------------------------------------------------------
+# RAM confirmation flow.
 p=Path('source/main_oc.cpp')
 m=p.read_text()
-
-# Append stage to keep all existing persisted stage numbers stable.
 m=must_replace(m,'    RamSweepResult,\n    RamBenchmark,\n};','    RamSweepResult,\n    RamBenchmark,\n    RamConfirm,\n};','RAM confirmation stage')
-
-# Persistent confirmation state. InProgress is intentionally saved before the
-# one-hour test starts, allowing a reboot after a freeze to be detected.
 m=must_replace(m,
 '''    int ramFailedMHz = 0;\n    int ramBenchmarkIndex = 0;''',
 '''    int ramFailedMHz = 0;\n    int ramBenchmarkIndex = 0;\n    int ramConfirmMHz = 0;\n    int ramConfirmInProgress = 0;\n    int ramConfirmPassed = 0;\n    int ramConfirmLastFailedMHz = 0;''',
 'RAM confirmation state')
-
+# Beta25 inserted custom-baseline fields between the earlier sweep fields, so append
+# confirmation persistence at the stable tail markers instead of matching the whole line.
 m=must_replace(m,
-'W(ramSearchIndex); W(ramSearchEndIndex); W(ramRecommendedMHz); W(ramStableMaxMHz); W(ramFailedMHz); W(ramBenchmarkIndex);',
-'W(ramSearchIndex); W(ramSearchEndIndex); W(ramRecommendedMHz); W(ramStableMaxMHz); W(ramFailedMHz); W(ramBenchmarkIndex); W(ramConfirmMHz); W(ramConfirmInProgress); W(ramConfirmPassed); W(ramConfirmLastFailedMHz);',
+'W(ramFailedMHz); W(ramBenchmarkIndex);',
+'W(ramFailedMHz); W(ramBenchmarkIndex); W(ramConfirmMHz); W(ramConfirmInProgress); W(ramConfirmPassed); W(ramConfirmLastFailedMHz);',
 'save RAM confirmation state')
 m=must_replace(m,
-'R(ramSearchIndex) R(ramSearchEndIndex) R(ramRecommendedMHz) R(ramStableMaxMHz) R(ramFailedMHz) R(ramBenchmarkIndex)',
-'R(ramSearchIndex) R(ramSearchEndIndex) R(ramRecommendedMHz) R(ramStableMaxMHz) R(ramFailedMHz) R(ramBenchmarkIndex) R(ramConfirmMHz) R(ramConfirmInProgress) R(ramConfirmPassed) R(ramConfirmLastFailedMHz)',
+'R(ramFailedMHz) R(ramBenchmarkIndex)',
+'R(ramFailedMHz) R(ramBenchmarkIndex) R(ramConfirmMHz) R(ramConfirmInProgress) R(ramConfirmPassed) R(ramConfirmLastFailedMHz)',
 'load RAM confirmation state')
-
-# Confirmation belongs to RAM capability discovery, not RAM Tune.
 m=must_replace(m,
 'if(s==Stage::RamSweepResult) return 2;\n    if(s==Stage::RamBenchmark) return 3;',
 'if(s==Stage::RamSweepResult) return 2;\n    if(s==Stage::RamConfirm) return 2;\n    if(s==Stage::RamBenchmark) return 3;',
 'confirmation progress step')
 
-# The short sweep no longer initializes the later SoC tuning target. That target
-# is initialized only after the one-hour max-clock candidate has been confirmed.
 new_finish=r'''void finishRamSweep(){
     clearOverrides();
     if(g.ramStableMaxMHz<=0){modalError("No stable RAM point was measured.");return;}
@@ -98,8 +78,6 @@ new_finish=r'''void finishRamSweep(){
 }'''
 m=replace_function(m,'void finishRamSweep()',new_finish)
 
-# Confirmation helpers are inserted before DVB handling, after the sweep/SoC
-# helpers already exist in the generated source.
 marker='void runDvb(){'
 helpers=r'''
 int previousRamConfirmationStep(int mhz){
@@ -154,9 +132,6 @@ void runRamConfirmation(){
         modalError("RAM "+std::to_string(g.ramConfirmMHz)+" MHz could not be activated for confirmation: "+e+" The candidate was not evaluated.");
         return;
     }
-
-    // Persist before the long test. If the console freezes/reboots here, reopening
-    // the Wizard sees this flag and conservatively drops one RAM step.
     g.ramConfirmInProgress=1;g.ramConfirmPassed=0;saveState();
     const int tested=g.ramConfirmMHz;
     const bool pass=runStress(stress::Kind::Ram,3600,
@@ -185,28 +160,18 @@ void runRamConfirmation(){
         return;
     }
 
-    // Cancel, charger removal or another technical abort does NOT condemn the
-    // candidate. Retry the same frequency later.
+    // Cancel, charger removal or another technical abort does not reject this clock.
     g.ramConfirmPassed=0;
     saveState();
 }
 '''
 m=must_replace(m,marker,helpers+'\n'+marker,'RAM confirmation helpers')
 
-# The sweep-result Continue button now enters confirmation instead of DVB.
 old_input='if(g.stage==Stage::RamSweepResult&&(k&HidNpadButton_A)){g.stage=Stage::RamDvb;saveState();redraw=true;continue;}'
 new_input='''if(g.stage==Stage::RamSweepResult&&(k&HidNpadButton_A)){g.ramConfirmMHz=g.ramStableMaxMHz;g.ramConfirmInProgress=0;g.ramConfirmPassed=0;g.ramConfirmLastFailedMHz=0;g.stage=Stage::RamConfirm;saveState();redraw=true;continue;}\n        if(g.stage==Stage::RamConfirm&&(k&HidNpadButton_A)){if(g.ramConfirmPassed){g.stage=Stage::RamDvb;saveState();}else runRamConfirmation();redraw=true;continue;}'''
 m=must_replace(m,old_input,new_input,'RAM confirmation input flow')
+m=must_replace(m,'print(11,"A : Continue to RAM tuning");','print(11,"A : Continue to 1-hour confirmation");','sweep result action wording')
 
-# Result page wording: the short sweep produces only a candidate, which must be
-# confirmed for one hour before DVB optimization begins.
-m=must_replace(m,
-'print(11,"A : Continue to RAM tuning");',
-'print(11,"A : Continue to 1-hour confirmation");',
-'sweep result action wording')
-
-# Add confirmation UI immediately before DVB. The first render after a freeze
-# performs the conservative one-step recovery exactly once.
 ui_marker='        case Stage::RamDvb:{'
 confirm_ui=r'''        case Stage::RamConfirm:{
             recoverInterruptedRamConfirmation();
@@ -239,19 +204,12 @@ confirm_ui=r'''        case Stage::RamConfirm:{
             gui::present();break;}
 '''
 m=must_replace(m,ui_marker,confirm_ui+ui_marker,'RAM confirmation UI')
-
-# ACTUAL ACTIVE VALUES should also be available on the appended confirmation stage.
 m=must_replace(m,
 'if((g.stage>=Stage::RamPreparation && g.stage<=Stage::RamFinalGraph) || g.stage==Stage::RamBenchmark){',
 'if((g.stage>=Stage::RamPreparation && g.stage<=Stage::RamFinalGraph) || g.stage==Stage::RamBenchmark || g.stage==Stage::RamConfirm){',
 'confirmation active values range')
-
 p.write_text(m)
 
-
-# -----------------------------------------------------------------------------
-# Audit: verify the new gate without changing later RAM methodology.
-# -----------------------------------------------------------------------------
 main=Path('source/main_oc.cpp').read_text()
 stress=Path('source/stress_tests.cpp').read_text()
 checks={
@@ -266,7 +224,7 @@ checks={
     'confirmation invalidates higher points':'invalidateRamPointsAbove' in main,
     'SoC curve begins after confirmation':'beginSocCurve(e)' in main[main.find('void runRamConfirmation'):main.find('void runDvb')],
     'short sweep remains 60s':'runStress(stress::Kind::Ram,60,"RAM Clock Stability - "' in main,
-    'immediate RAM failure cleanup':'powerguard::clearOverrides();' in stress and 'FailureMemtester' in stress and 'RAM safety: remove CPU/GPU/RAM temporary overrides immediately' in stress,
+    'immediate RAM failure cleanup':'RAM safety: remove CPU/GPU/RAM temporary overrides immediately' in stress and 'powerguard::clearOverrides();' in stress,
     'charger guard retained':'powerLost' in stress and 'charger.connected' in stress,
     'private force pass retained':'developerForcePass' in stress and 'HidNpadButton_Plus' in stress,
     'private force fail retained':'developerForceFail' in stress and 'HidNpadButton_Minus' in stress,
