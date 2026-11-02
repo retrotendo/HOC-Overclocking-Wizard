@@ -1,0 +1,60 @@
+name: Publish v0.1.0-beta.46
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v0.1.0-beta.46.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build cumulative beta46 source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, textwrap
+          w=Path('.github/workflows/release-v0.1.0-beta.45.yml').read_text()
+          anchor='      - name: Build cumulative beta45 source\n'
+          start=w.index(anchor)
+          runpos=w.index('        run: |\n',start)+len('        run: |\n')
+          end=w.index('\n      - name: Build NRO',runpos)
+          script=textwrap.dedent(w[runpos:end])
+          Path('/tmp/build_beta45_source.sh').write_text(script)
+          subprocess.run(['bash','-e','-u','-o','pipefail','/tmp/build_beta45_source.sh'],check=True)
+          PY
+          python3 .github/scripts/build_beta46_patch.py
+
+      - name: Build NRO
+        run: make -j2
+      - name: Checksum
+        run: sha256sum HOC-Overclocking-Wizard.nro > HOC-Overclocking-Wizard.nro.sha256
+      - name: Publish pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.0-beta.46
+          target_commitish: main
+          name: HOC Overclocking Wizard v0.1.0-beta.46
+          prerelease: true
+          make_latest: false
+          body: |
+            Beta 46 changes only the user-facing RAM result presentation from percent to a Wizard RAM Score.
+            - Lowest measured RAM point is displayed as RAM Score 1000.
+            - Best measured RAM point is displayed as RAM Score 2000.
+            - Intermediate points are linearly mapped across that measured tuning gain, preserving the stronger visible progress curve introduced in beta45.
+            - The selected-point summary and RAM target-selection page now show RAM Score instead of percent.
+            - The green graph legend is renamed to `RAM Score` and the graph is normalized across the score span so 1000 is at the bottom and 2000 at the top.
+            - This is display-only: the raw eight-metric composite index and both Efficiency/Performance recommendation algorithms are unchanged.
+            - Beta44 Switch-like point controls, expanded recommendation text, hidden ZL+ZR+Plus RAM Debug, recovery, DVB8 and downstream VDD2/VDDQ tuning remain unchanged.
+          files: |
+            HOC-Overclocking-Wizard.nro
+            HOC-Overclocking-Wizard.nro.sha256
