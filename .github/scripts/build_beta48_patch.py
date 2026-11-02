@@ -6,6 +6,13 @@ def must_replace(s, old, new, name, count=1):
         raise SystemExit(f"beta48 marker missing: {name}")
     return s.replace(old, new, count)
 
+
+def replace_any(s, candidates, new, name):
+    for old in candidates:
+        if old in s:
+            return s.replace(old, new, 1)
+    raise SystemExit(f"beta48 marker missing: {name}")
+
 # Version only; score/recommendation math is intentionally unchanged.
 p=Path('Makefile'); s=p.read_text()
 s=must_replace(s,'APP_VERSION := 0.1.0-beta.47','APP_VERSION := 0.1.0-beta.48','version')
@@ -16,9 +23,6 @@ p.write_text(s)
 # -----------------------------------------------------------------------------
 p=Path('source/gui_console.cpp'); g=p.read_text()
 
-# Replace beta47 elongated four-pad control with a tiny round four-button cluster
-# matching the user's reference: four small circles in a cross, only Left/Right
-# marked. Keep it compact in the free graph header area.
 old_cluster='''            // Switch-like four-pad inspection control. The larger separated pads
             // mirror the physical four-button cluster without drawing a bulky D-pad.
             // Only Left/Right are active; Up/Down remain blank and muted.
@@ -38,14 +42,13 @@ old_cluster='''            // Switch-like four-pad inspection control. The large
             drawLine(rx+14,ry+7,rx+23,ry+13,C_TEXT,2);
             drawLine(rx+23,ry+13,rx+14,ry+19,C_TEXT,2);
             drawText(dcx+60,dcy-9,14,C_TEXT,"Inspect points");'''
-new_cluster='''            // Tiny round four-button inspection cluster, matching the physical
-            // Switch four-button look without covering the graph. Only L/R are marked.
+new_cluster='''            // Tiny round four-button inspection cluster, matching the user's
+            // reference. Only Left/Right are marked; Up/Down stay blank and muted.
             const int dcx=gx+34, dcy=y+112, dr=9, ds=13;
             fillCircle(dcx,dcy-ds,dr,C_BORDER); fillCircle(dcx,dcy-ds,dr-2,C_PANEL_2);
             fillCircle(dcx,dcy+ds,dr,C_BORDER); fillCircle(dcx,dcy+ds,dr-2,C_PANEL_2);
             fillCircle(dcx-ds,dcy,dr,C_BLUE);   fillCircle(dcx-ds,dcy,dr-2,C_PANEL_2);
             fillCircle(dcx+ds,dcy,dr,C_BLUE);   fillCircle(dcx+ds,dcy,dr-2,C_PANEL_2);
-            // Small outlined arrowheads inside the left/right round buttons.
             drawLine(dcx-ds+3,dcy-4,dcx-ds-2,dcy,C_TEXT,2);
             drawLine(dcx-ds-2,dcy,dcx-ds+3,dcy+4,C_TEXT,2);
             drawLine(dcx+ds-3,dcy-4,dcx+ds+2,dcy,C_TEXT,2);
@@ -53,37 +56,33 @@ new_cluster='''            // Tiny round four-button inspection cluster, matchin
             drawText(dcx+32,dcy-8,15,C_TEXT,"Inspect points");'''
 g=must_replace(g,old_cluster,new_cluster,'mini round four-button cluster')
 
-# Increase graph legend readability.
-g=must_replace(g,
-    '            drawText(gx+541,y+103,13,C_TEXT,"RAM Score");',
-    '            drawText(gx+541,y+101,15,C_TEXT,"RAM Score");',
-    'RAM Score legend font')
-g=must_replace(g,
-    '            drawText(gx+701,y+103,13,C_TEXT,"SoC mV");',
-    '            drawText(gx+701,y+101,15,C_TEXT,"SoC mV");',
-    'SoC legend font')
+# Larger legends.
+g=must_replace(g,'            drawText(gx+541,y+103,13,C_TEXT,"RAM Score");','            drawText(gx+541,y+101,15,C_TEXT,"RAM Score");','RAM Score legend font')
+g=must_replace(g,'            drawText(gx+701,y+103,13,C_TEXT,"SoC mV");','            drawText(gx+701,y+101,15,C_TEXT,"SoC mV");','SoC legend font')
 
-# EFF/PERF/MAX markers larger.
-g=must_replace(g,
+# Larger EFF/PERF/MAX role markers, including the possible combined marker.
+g=replace_any(g,[
+    'drawText(std::max(gx,xx-30),gy-20,10,C_GREEN,"EFF+PERF")',
+], 'drawText(std::max(gx,xx-36),gy-24,12,C_GREEN,"EFF+PERF")', 'EFF+PERF marker font')
+g=replace_any(g,[
+    'drawText(std::max(gx,xx-16),gy-20,11,C_GREEN,"EFF")',
     'drawText(std::max(gx,xx-18),gy-20,11,C_GREEN,"EFF")',
-    'drawText(std::max(gx,xx-21),gy-22,13,C_GREEN,"EFF")',
-    'EFF marker font')
-g=must_replace(g,
+], 'drawText(std::max(gx,xx-20),gy-23,13,C_GREEN,"EFF")', 'EFF marker font')
+g=replace_any(g,[
+    'drawText(std::max(gx,xx-18),gy-20,11,C_GREEN,"PERF")',
     'drawText(std::max(gx,xx-20),gy-20,11,C_GREEN,"PERF")',
-    'drawText(std::max(gx,xx-23),gy-22,13,C_GREEN,"PERF")',
-    'PERF marker font')
-g=must_replace(g,
+], 'drawText(std::max(gx,xx-23),gy-23,13,C_GREEN,"PERF")', 'PERF marker font')
+g=replace_any(g,[
     'drawText(std::min(gx+gw-28,std::max(gx,xx-14)),gy-34,11,C_RED,"MAX")',
-    'drawText(std::min(gx+gw-34,std::max(gx,xx-17)),gy-38,13,C_RED,"MAX")',
-    'MAX marker font')
+], 'drawText(std::min(gx+gw-34,std::max(gx,xx-17)),gy-38,13,C_RED,"MAX")', 'MAX marker font')
 
-# X-axis MHz labels larger and easier to read.
-g=must_replace(g,
+# Larger frequency labels. Accept either historical vertical offset.
+g=replace_any(g,[
     'drawText(xx-textWidth(lab,10)/2,gy+gh+8,10,i==selected?C_TEXT:C_MUTED,lab);',
-    'drawText(xx-textWidth(lab,12)/2,gy+gh+8,12,i==selected?C_TEXT:C_MUTED,lab);',
-    'MHz label font')
+    'drawText(xx-textWidth(lab,10)/2,gy+gh+6,10,i==selected?C_TEXT:C_MUTED,lab);',
+], 'drawText(xx-textWidth(lab,12)/2,gy+gh+8,12,i==selected?C_TEXT:C_MUTED,lab);', 'MHz label font')
 
-# Selected-point summary + recommendations: both larger, as requested.
+# Selected point + recommendation line larger.
 old_summary='''                drawText(gx,sy,12,C_TEXT,fitText(g_view.chartSummary,12,std::max(250,gw-500)));
                 drawTextRight(gx+gw,sy,12,C_GREEN,rec);'''
 new_summary='''                drawText(gx,sy,14,C_TEXT,fitText(g_view.chartSummary,14,std::max(280,gw-570)));
@@ -92,19 +91,11 @@ g=must_replace(g,old_summary,new_summary,'larger selected point and recommendati
 p.write_text(g)
 
 # -----------------------------------------------------------------------------
-# Remove the duplicate X action on the RAM graph. A alone continues to the same
-# mandatory explanation page. X remains available where it has a distinct role
-# on later screens (e.g. back from the explanation page).
+# Remove duplicate X action on RAM graph; A alone opens mandatory explanation.
 # -----------------------------------------------------------------------------
 p=Path('source/main_oc.cpp'); m=p.read_text()
-m=must_replace(m,
-    '            if((k&HidNpadButton_A)||(k&HidNpadButton_X)){g.stage=Stage::RamTargetExplanation;saveState();redraw=true;continue;}',
-    '            if(k&HidNpadButton_A){g.stage=Stage::RamTargetExplanation;saveState();redraw=true;continue;}',
-    'RAM graph A-only explanation input')
-m=must_replace(m,
-    '            print(9,"A : Continue to explanation");\n            print(10,"X : Show explanation");\n            print(11,"B : Exit");',
-    '            print(9,"A : Continue to explanation");\n            print(10,"B : Exit");',
-    'remove duplicate X graph action')
+m=must_replace(m,'            if((k&HidNpadButton_A)||(k&HidNpadButton_X)){g.stage=Stage::RamTargetExplanation;saveState();redraw=true;continue;}','            if(k&HidNpadButton_A){g.stage=Stage::RamTargetExplanation;saveState();redraw=true;continue;}','RAM graph A-only explanation input')
+m=must_replace(m,'            print(9,"A : Continue to explanation");\n            print(10,"X : Show explanation");\n            print(11,"B : Exit");','            print(9,"A : Continue to explanation");\n            print(10,"B : Exit");','remove duplicate X graph action')
 p.write_text(m)
 
 # Audit: UI-only beta. Keep beta47 score + recommendation math intact.
@@ -114,11 +105,11 @@ rec_region=main[perf_start:perf_end] if perf_start>=0 and perf_end>perf_start el
 checks={
     'beta48 version':'0.1.0-beta.48' in Path('Makefile').read_text(),
     'mini round cluster':'const int dcx=gx+34, dcy=y+112, dr=9, ds=13' in gui,
-    'round left right buttons':'fillCircle(dcx-ds,dcy' in gui and 'fillCircle(dcx+ds,dcy' in gui,
-    'round top bottom buttons':'fillCircle(dcx,dcy-ds' in gui and 'fillCircle(dcx,dcy+ds' in gui,
+    'round side buttons':'fillCircle(dcx-ds,dcy' in gui and 'fillCircle(dcx+ds,dcy' in gui,
+    'round vertical buttons':'fillCircle(dcx,dcy-ds' in gui and 'fillCircle(dcx,dcy+ds' in gui,
     'inspect text retained':'Inspect points' in gui,
     'larger legends':'15,C_TEXT,"RAM Score"' in gui and '15,C_TEXT,"SoC mV"' in gui,
-    'larger marker text':'13,C_GREEN,"EFF"' in gui and '13,C_GREEN,"PERF"' in gui and '13,C_RED,"MAX"' in gui,
+    'larger markers':'12,C_GREEN,"EFF+PERF"' in gui and '13,C_GREEN,"EFF"' in gui and '13,C_GREEN,"PERF"' in gui and '13,C_RED,"MAX"' in gui,
     'larger mhz labels':'textWidth(lab,12)' in gui,
     'larger summary recommendation':'drawText(gx,sy,14' in gui and 'drawTextRight(gx+gw,sy,14' in gui,
     'duplicate X graph action removed':'X : Show explanation' not in main,
