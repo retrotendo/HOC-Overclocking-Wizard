@@ -1,0 +1,60 @@
+name: Publish v0.1.0-beta.47
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v0.1.0-beta.47.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build cumulative beta47 source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, textwrap
+          w=Path('.github/workflows/release-v0.1.0-beta.46.yml').read_text()
+          anchor='      - name: Build cumulative beta46 source\n'
+          start=w.index(anchor)
+          runpos=w.index('        run: |\n',start)+len('        run: |\n')
+          end=w.index('\n      - name: Build NRO',runpos)
+          script=textwrap.dedent(w[runpos:end])
+          Path('/tmp/build_beta46_source.sh').write_text(script)
+          subprocess.run(['bash','-e','-u','-o','pipefail','/tmp/build_beta46_source.sh'],check=True)
+          PY
+          python3 .github/scripts/build_beta47_patch.py
+
+      - name: Build NRO
+        run: make -j2
+      - name: Checksum
+        run: sha256sum HOC-Overclocking-Wizard.nro > HOC-Overclocking-Wizard.nro.sha256
+      - name: Publish pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.0-beta.47
+          target_commitish: main
+          name: HOC Overclocking Wizard v0.1.0-beta.47
+          prerelease: true
+          make_latest: false
+          body: |
+            Beta 47 replaces the arbitrary 1000-2000 display mapping with a benchmark-derived RAM Score and refines point navigation visuals.
+            - Public RAM Score is now based directly on measured CPU Read/Copy, GPU Read/Copy and Full-RAM latency.
+            - Bandwidth is the geometric mean of CPU Read, CPU Copy, GPU Read and GPU Copy; raw score is Bandwidth / Full-RAM latency.
+            - The lowest-frequency valid measured RAM point is the 1000-point reference. Higher scores are real measured ratios to that baseline; Stable Max is no longer forced to 2000.
+            - Write and L2 remain part of the internal eight-metric composite used for Efficiency/Performance recommendations, but are intentionally excluded from the public RAM Score.
+            - Efficiency and Performance recommendation algorithms are unchanged.
+            - The point-inspection control is redesigned as four larger separated Switch-like pads in a cross: top/bottom blank and muted, left/right active with minimalist chevrons.
+            - Expanded recommendation text, hidden ZL+ZR+Plus RAM Debug, recovery, DVB8 and downstream VDD2/VDDQ tuning remain unchanged.
+          files: |
+            HOC-Overclocking-Wizard.nro
+            HOC-Overclocking-Wizard.nro.sha256
