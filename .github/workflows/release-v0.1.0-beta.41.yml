@@ -1,0 +1,60 @@
+name: Publish v0.1.0-beta.41
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v0.1.0-beta.41.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build cumulative beta41 source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, textwrap
+          w=Path('.github/workflows/release-v0.1.0-beta.40.yml').read_text()
+          anchor='      - name: Build cumulative beta40 source\n'
+          start=w.index(anchor)
+          runpos=w.index('        run: |\n',start)+len('        run: |\n')
+          end=w.index('\n      - name: Build NRO',runpos)
+          script=textwrap.dedent(w[runpos:end])
+          Path('/tmp/build_beta40_source.sh').write_text(script)
+          subprocess.run(['bash','-e','-u','-o','pipefail','/tmp/build_beta40_source.sh'],check=True)
+          PY
+          python3 .github/scripts/build_beta41_patch.py
+
+      - name: Build NRO
+        run: make -j2
+      - name: Checksum
+        run: sha256sum HOC-Overclocking-Wizard.nro > HOC-Overclocking-Wizard.nro.sha256
+      - name: Publish pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.0-beta.41
+          target_commitish: main
+          name: HOC Overclocking Wizard v0.1.0-beta.41
+          prerelease: true
+          make_latest: false
+          body: |
+            Beta 41 cleans up the interrupted RAM sweep decision dialog.
+            - An active interrupted RAM candidate now has exactly two choices: A = YES, mark the shown RAM clock failed; X = NO, retry the same RAM clock.
+            - Exit/B is removed from this RAM sweep recovery prompt.
+            - The modal renderer now gives A and X two separate full-width buttons when only two decision actions exist.
+            - Controller letters are supplied only by the button icons; action labels no longer duplicate A/X in their text.
+            - A safe between-candidate interruption now offers only Continue with the next RAM clock.
+            - Recovery behavior itself is unchanged: A still rejects the armed candidate and X still clears transient state and retries it.
+            - Beta40 Efficiency/Performance Recommendations, Beta37 transition handling, Beta38 confirmation recovery, DVB8 baseline and downstream tuning remain unchanged.
+          files: |
+            HOC-Overclocking-Wizard.nro
+            HOC-Overclocking-Wizard.nro.sha256
