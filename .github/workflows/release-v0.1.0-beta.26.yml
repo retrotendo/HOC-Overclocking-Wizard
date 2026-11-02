@@ -1,5 +1,5 @@
 name: Publish v0.1.0-beta.26
-# retry after global renderer marker fix
+# retry after beta25 baseline audit fix
 
 on:
   push:
