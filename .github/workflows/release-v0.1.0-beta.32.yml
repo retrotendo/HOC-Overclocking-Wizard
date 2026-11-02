@@ -93,6 +93,18 @@ jobs:
         run: python3 .github/scripts/build_beta30_patch.py
       - name: Apply beta31 RAM debug data page
         run: python3 .github/scripts/build_beta31_patch.py
+      - name: Prepare beta32 audit marker
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/scripts/build_beta32_patch.py')
+          s=p.read_text()
+          old="'override cleanup retained':'Do not leave the benchmark RAM clock active' in main,"
+          new="'override cleanup retained':'clearOverrides();' in main[main.find('bool runFinalRamBenchmarkPoint'):main.find('void finishFinalRamBenchmarkSweep')],"
+          if old not in s:
+              raise SystemExit('beta32 audit marker missing')
+          p.write_text(s.replace(old,new,1))
+          PY
       - name: Apply beta32 full RAM metrics and composite index
         run: python3 .github/scripts/build_beta32_patch.py
 
