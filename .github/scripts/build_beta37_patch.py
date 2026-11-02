@@ -151,7 +151,7 @@ checks={
  'next screen before next activation':'showNextRamCandidateTransition(nextFreq)' in candidate,
  'transition no override':'void showNextRamCandidateTransition' in main and 'clearOverrides();' in main[main.find('void showNextRamCandidateTransition'):main.find('void runRamCandidate()')],
  'one candidate recovery retained':'Did RAM ' in main and 'Last completed stable:' not in main,
- 'simple confirm retained':'Confirm RAM Clock Stability' in main and 'Rejected RAM clock:' not in main,
+ 'simple confirm retained':'RAM candidate: ' in main and 'Rejected RAM clock:' not in main,
  '60 second sweep retained':'runStress(stress::Kind::Ram,60' in candidate,
  'one hour confirmation retained':'runStress(stress::Kind::Ram,3600' in main,
  'DVB8 retained':'DVB8 / 66MHz Step Mode' in main,
