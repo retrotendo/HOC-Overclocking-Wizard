@@ -6,6 +6,23 @@ def must_replace(s, old, new, name, count=1):
         raise SystemExit(f"beta26 marker missing: {name}")
     return s.replace(old, new, count)
 
+
+def replace_function(src, signature, replacement):
+    pos=src.find(signature)
+    if pos < 0:
+        raise SystemExit(f"beta26 function missing: {signature}")
+    brace=src.find('{',pos)
+    depth=0; end=None
+    for i in range(brace,len(src)):
+        if src[i]=='{': depth+=1
+        elif src[i]=='}':
+            depth-=1
+            if depth==0:
+                end=i+1; break
+    if end is None:
+        raise SystemExit(f"beta26 unbalanced function: {signature}")
+    return src[:pos]+replacement+src[end:]
+
 # Version only. No tuning-state/methodology changes in this patch.
 p=Path('Makefile')
 s=p.read_text()
@@ -15,19 +32,37 @@ p.write_text(s)
 p=Path('source/gui_console.cpp')
 g=p.read_text()
 
-# drawInstructionCard needs the wrapping helper before its definition.
-progress_end='''}\n\nvoid drawInstructionCard() {'''
-wrapped_decl='''}\n\nint drawWrappedText(int x, int y, int size, u32 color, const std::string& text,\n                    int maxWidth, int lineHeight, int maxLines);\n\nvoid drawInstructionCard() {'''
-g=must_replace(g,progress_end,wrapped_decl,'wrapped text declaration before task card')
+# drawInstructionCard needs the wrapping helper declared before its definition.
+funcpos=g.find('void drawInstructionCard()')
+if funcpos < 0: raise SystemExit('beta26 drawInstructionCard missing')
+pre=g[:funcpos]
+if 'int drawWrappedText(int x, int y, int size' not in pre:
+    decl='''int drawWrappedText(int x, int y, int size, u32 color, const std::string& text,\n                    int maxWidth, int lineHeight, int maxLines);\n\n'''
+    g=g[:funcpos]+decl+g[funcpos:]
 
 # Global YOUR TASK policy: wrap title/subtitle inside the card; never render action hints here.
-old_task='''void drawInstructionCard() {\n    const int x = 835, y = 158, w = 405, h = 205;\n    drawCard(x, y, w, h, true);\n    drawLabel(x + 24, y + 20, "YOUR TASK");\n    drawText(x + 24, y + 52, 23, C_TEXT,\n             fitText(g_view.instructionTitle.empty() ? "Continue Wizard" : g_view.instructionTitle, 23, w - 48));\n    drawText(x + 24, y + 91, 16, C_MUTED, fitText(g_view.instructionLine1, 16, w - 48));\n\n    roundedRect(x + 22, y + 126, w - 44, 54, 12, mix(C_PANEL_2, C_CYAN, 11));\n    drawText(x + 38, y + 137, 25, C_CYAN, fitText(g_view.instructionLine2, 25, w - 76));\n}'''
-new_task='''void drawInstructionCard() {\n    const int x = 835, y = 158, w = 405, h = 205;\n    drawCard(x, y, w, h, true);\n    drawLabel(x + 24, y + 20, "YOUR TASK");\n\n    int ty = y + 48;\n    ty = drawWrappedText(x + 24, ty, 22, C_TEXT,\n        g_view.instructionTitle.empty() ? "Continue Wizard" : g_view.instructionTitle,\n        w - 48, 28, 3);\n\n    if (!g_view.instructionLine1.empty() && ty < y + h - 30) {\n        ty += 10;\n        drawWrappedText(x + 24, ty, 15, C_MUTED, g_view.instructionLine1,\n                        w - 48, 21, 3);\n    }\n}'''
-g=must_replace(g,old_task,new_task,'global wrapped YOUR TASK card')
+new_task=r'''void drawInstructionCard() {
+    const int x = 835, y = 158, w = 405, h = 205;
+    drawCard(x, y, w, h, true);
+    drawLabel(x + 24, y + 20, "YOUR TASK");
 
-# Remove the now-redundant later forward declaration.
-late_decl='''\nint drawWrappedText(int x, int y, int size, u32 color, const std::string& text,\n                    int maxWidth, int lineHeight, int maxLines);\n\nvoid drawMainCard() {'''
-g=must_replace(g,late_decl,'\nvoid drawMainCard() {','remove duplicate wrapped text declaration')
+    int ty = y + 48;
+    ty = drawWrappedText(x + 24, ty, 22, C_TEXT,
+        g_view.instructionTitle.empty() ? "Continue Wizard" : g_view.instructionTitle,
+        w - 48, 28, 3);
+
+    if (!g_view.instructionLine1.empty() && ty < y + h - 30) {
+        ty += 10;
+        drawWrappedText(x + 24, ty, 15, C_MUTED, g_view.instructionLine1,
+                        w - 48, 21, 3);
+    }
+}'''
+g=replace_function(g,'void drawInstructionCard()',new_task)
+
+# Remove a later duplicate forward declaration if present.
+late='''\nint drawWrappedText(int x, int y, int size, u32 color, const std::string& text,\n                    int maxWidth, int lineHeight, int maxLines);\n\nvoid drawMainCard() {'''
+if late in g:
+    g=g.replace(late,'\nvoid drawMainCard() {',1)
 
 # Global main-card vertical rhythm. Give every logical item visible breathing room.
 g=must_replace(g,'by += 26;\n                ++shown;','by += 34;\n                ++shown;','heading spacing')
