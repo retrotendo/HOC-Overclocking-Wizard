@@ -1,0 +1,61 @@
+name: Publish v0.1.0-beta.49
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v0.1.0-beta.49.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build cumulative beta49 source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, textwrap
+          w=Path('.github/workflows/release-v0.1.0-beta.48.yml').read_text()
+          anchor='      - name: Build cumulative beta48 source\n'
+          start=w.index(anchor)
+          runpos=w.index('        run: |\n',start)+len('        run: |\n')
+          end=w.index('\n      - name: Build NRO',runpos)
+          script=textwrap.dedent(w[runpos:end])
+          Path('/tmp/build_beta48_source.sh').write_text(script)
+          subprocess.run(['bash','-e','-u','-o','pipefail','/tmp/build_beta48_source.sh'],check=True)
+          PY
+          python3 .github/scripts/build_beta49_patch.py
+
+      - name: Build NRO
+        run: make -j2
+      - name: Checksum
+        run: sha256sum HOC-Overclocking-Wizard.nro > HOC-Overclocking-Wizard.nro.sha256
+      - name: Publish pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.0-beta.49
+          target_commitish: main
+          name: HOC Overclocking Wizard v0.1.0-beta.49
+          prerelease: true
+          make_latest: false
+          body: |
+            Beta 49 focuses on RAM result and target-explanation presentation only.
+            - RAM result graph is substantially wider and taller to use the available full-width card instead of compressing the curves.
+            - The tiny four-button Left/Right inspection hint stays in the header and no longer competes with graph data.
+            - Graph legends, MHz labels and EFF/PERF/MAX role labels are enlarged.
+            - Selected-point details and the Efficiency/Performance recommendation are split into two readable lines below the graph.
+            - RAM target explanation now uses the full-width card; the separate YOUR TASK box is removed.
+            - Explanation text is simplified and explicitly states that the selected target becomes the profile maximum because VDD2/VDDQ are tuned for it next.
+            - It now warns that clocks above the selected target should not be used after voltage tuning and must be re-tuned if the user later wants a higher target.
+            - Benchmark-derived RAM Score, Efficiency/Performance recommendation algorithms, hidden RAM Debug, recovery, DVB8 baseline and downstream tuning logic are unchanged.
+          files: |
+            HOC-Overclocking-Wizard.nro
+            HOC-Overclocking-Wizard.nro.sha256
