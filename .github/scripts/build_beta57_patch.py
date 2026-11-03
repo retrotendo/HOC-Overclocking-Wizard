@@ -30,6 +30,26 @@ def find_braced_block(src, marker):
     return pos, end, src[pos:end]
 
 
+def replace_function(src, signature, replacement):
+    pos = src.find(signature)
+    if pos < 0:
+        raise SystemExit(f"beta57 function missing: {signature}")
+    brace = src.find('{', pos)
+    depth = 0
+    end = None
+    for i in range(brace, len(src)):
+        if src[i] == '{':
+            depth += 1
+        elif src[i] == '}':
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+    if end is None:
+        raise SystemExit(f"beta57 unbalanced function: {signature}")
+    return src[:pos] + replacement + src[end:]
+
+
 def find_case_block(src, needle):
     pos = src.find(needle)
     if pos < 0:
@@ -65,14 +85,13 @@ p.write_text(s)
 p = Path('source/main_oc.cpp')
 m = p.read_text()
 
-# User wants the practical result stated clearly, not conditionally.
 m = must_replace(
     m,
     'Lower VDD2/VDDQ can reduce overall RAM temperatures and power consumption.',
     'Lower VDD2/VDDQ will reduce overall RAM temperatures and power consumption.',
     'will reduce wording')
 
-# Force the actual RAM target case to carry both fixed task lines.
+# Force both task lines inside the actual RAM target case.
 start, end, target = find_case_block(m, 'Choose RAM Target')
 target, n1 = re.subn(
     r'v\.instructionLine1\s*=\s*"[^"]*"\s*;',
@@ -100,17 +119,36 @@ m = m[:pos] + input_block + m[end:]
 p.write_text(m)
 
 # -----------------------------------------------------------------------------
-# Task card: for RAM target selection render line 2 as a real second prose line,
-# not as the generic highlighted lower card. This guarantees both lines are visible.
-# Move Inspect points further left to the user-marked free region.
+# Task card: beta26 intentionally hid instructionLine2 globally. Keep that policy,
+# but render a second muted prose line specifically for RAM target selection.
 # -----------------------------------------------------------------------------
 p = Path('source/gui_console.cpp')
 g = p.read_text()
+new_task = r'''void drawInstructionCard() {
+    const int x = 835, y = 158, w = 405, h = 205;
+    drawCard(x, y, w, h, true);
+    drawLabel(x + 24, y + 20, "YOUR TASK");
 
-old_task = '''    drawText(x + 24, y + 91, 16, C_MUTED, fitText(g_view.instructionLine1, 16, w - 48));\n\n    roundedRect(x + 22, y + 126, w - 44, 54, 12, mix(C_PANEL_2, C_CYAN, 11));\n    drawText(x + 38, y + 137, 25, C_CYAN, fitText(g_view.instructionLine2, 25, w - 76));'''
-new_task = '''    drawText(x + 24, y + 91, 16, C_MUTED, fitText(g_view.instructionLine1, 16, w - 48));\n\n    if (g_view.instructionTitle == "Choose your RAM target") {\n        drawText(x + 24, y + 116, 16, C_MUTED, fitText(g_view.instructionLine2, 16, w - 48));\n    } else {\n        roundedRect(x + 22, y + 126, w - 44, 54, 12, mix(C_PANEL_2, C_CYAN, 11));\n        drawText(x + 38, y + 137, 25, C_CYAN, fitText(g_view.instructionLine2, 25, w - 76));\n    }'''
-g = must_replace(g, old_task, new_task, 'RAM target task two-line renderer')
+    int ty = y + 48;
+    ty = drawWrappedText(x + 24, ty, 22, C_TEXT,
+        g_view.instructionTitle.empty() ? "Continue Wizard" : g_view.instructionTitle,
+        w - 48, 28, 3);
 
+    if (!g_view.instructionLine1.empty() && ty < y + h - 30) {
+        ty += 10;
+        ty = drawWrappedText(x + 24, ty, 15, C_MUTED, g_view.instructionLine1,
+                             w - 48, 21, 3);
+        if (g_view.instructionTitle == "Choose your RAM target" &&
+            !g_view.instructionLine2.empty() && ty < y + h - 20) {
+            ty += 2;
+            drawWrappedText(x + 24, ty, 15, C_MUTED, g_view.instructionLine2,
+                            w - 48, 21, 2);
+        }
+    }
+}'''
+g = replace_function(g, 'void drawInstructionCard()', new_task)
+
+# Move Inspect points further left to the exact free region marked by the user.
 g = must_replace(
     g,
     'const int dcx=gx+300, dcy=y+111, dr=8, ds=11;',
@@ -137,8 +175,8 @@ checks = {
     'target task line 1 scoped': 'v.instructionLine1="Use the Left / Right buttons"' in target,
     'target task line 2 scoped': 'v.instructionLine2="to select your target frequency."' in target,
     'target task special renderer': 'g_view.instructionTitle == "Choose your RAM target"' in gui,
-    'target second prose line visible': 'drawText(x + 24, y + 116, 16, C_MUTED, fitText(g_view.instructionLine2, 16, w - 48));' in gui,
-    'generic task renderer retained': 'roundedRect(x + 22, y + 126, w - 44, 54, 12' in gui and 'y + 137, 25, C_CYAN' in gui,
+    'target line2 rendered': 'drawWrappedText(x + 24, ty, 15, C_MUTED, g_view.instructionLine2' in gui,
+    'global task wrapping retained': 'drawWrappedText(x + 24, ty, 22, C_TEXT' in gui and 'g_view.instructionLine1' in gui,
     'back resets explanation page': 'g_ramTargetExplanationPage=0;g.stage=Stage::RamTargetExplanation;' in select_input,
     'two-page explanation retained': 'Choosing Your RAM Target (1/2)' in main and 'Choosing Your RAM Target (2/2)' in main,
     'Inspect points moved left': 'const int dcx=gx+200, dcy=y+111, dr=8, ds=11' in gui,
