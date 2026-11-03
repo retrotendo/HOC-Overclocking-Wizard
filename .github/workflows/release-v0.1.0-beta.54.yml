@@ -1,0 +1,59 @@
+name: Publish v0.1.0-beta.54
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v0.1.0-beta.54.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build cumulative beta54 source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, textwrap
+          w=Path('.github/workflows/release-v0.1.0-beta.53.yml').read_text()
+          anchor='      - name: Build cumulative beta53 source\n'
+          start=w.index(anchor)
+          runpos=w.index('        run: |\n',start)+len('        run: |\n')
+          end=w.index('\n      - name: Build NRO',runpos)
+          script=textwrap.dedent(w[runpos:end])
+          Path('/tmp/build_beta53_source.sh').write_text(script)
+          subprocess.run(['bash','-e','-u','-o','pipefail','/tmp/build_beta53_source.sh'],check=True)
+          PY
+          python3 .github/scripts/build_beta54_patch.py
+
+      - name: Build NRO
+        run: make -j2
+      - name: Checksum
+        run: sha256sum HOC-Overclocking-Wizard.nro > HOC-Overclocking-Wizard.nro.sha256
+      - name: Publish pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.0-beta.54
+          target_commitish: main
+          name: HOC Overclocking Wizard v0.1.0-beta.54
+          prerelease: true
+          make_latest: false
+          body: |
+            Beta 54 improves the visual hierarchy of the RAM target explanation.
+            - Keeps the existing two-page explanation flow.
+            - Uses left-aligned block headings with their explanatory lines indented underneath.
+            - Page 1 groups Efficiency and Performance as two separate visual blocks.
+            - Page 2 groups Selected Target, Next Steps and Important as separate visual blocks.
+            - Keeps the full higher-clock/VDD2/VDDQ warning and two-page navigation.
+            - RAM target task copy, RAM Score, recommendation logic, graph, hidden debug and downstream tuning logic are unchanged.
+          files: |
+            HOC-Overclocking-Wizard.nro
+            HOC-Overclocking-Wizard.nro.sha256
