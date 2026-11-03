@@ -13,15 +13,12 @@ s=must_replace(s,'APP_VERSION := 0.1.0-beta.55','APP_VERSION := 0.1.0-beta.56','
 p.write_text(s)
 
 # -----------------------------------------------------------------------------
-# RAM target selection task copy: explicit, short fixed lines.
+# RAM target selection task copy: line 1 already has the desired fixed wording
+# from beta53; change only line 2.
 # -----------------------------------------------------------------------------
 p=Path('source/main_oc.cpp'); m=p.read_text()
 m=must_replace(m,
-    'v.instructionLine1="Use the Left / Right buttons to inspect and";',
-    'v.instructionLine1="Use the Left / Right buttons";',
-    'target task line 1')
-m=must_replace(m,
-    'v.instructionLine2="select another measured stable RAM point.";',
+    'v.instructionLine2="to inspect a stable RAM point.";',
     'v.instructionLine2="to select your target frequency.";',
     'target task line 2')
 
