@@ -1,0 +1,59 @@
+name: Publish v0.1.0-beta.56
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v0.1.0-beta.56.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build cumulative beta56 source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, textwrap
+          w=Path('.github/workflows/release-v0.1.0-beta.55.yml').read_text()
+          anchor='      - name: Build cumulative beta55 source\n'
+          start=w.index(anchor)
+          runpos=w.index('        run: |\n',start)+len('        run: |\n')
+          end=w.index('\n      - name: Build NRO',runpos)
+          script=textwrap.dedent(w[runpos:end])
+          Path('/tmp/build_beta55_source.sh').write_text(script)
+          subprocess.run(['bash','-e','-u','-o','pipefail','/tmp/build_beta55_source.sh'],check=True)
+          PY
+          python3 .github/scripts/build_beta56_patch.py
+
+      - name: Build NRO
+        run: make -j2
+      - name: Checksum
+        run: sha256sum HOC-Overclocking-Wizard.nro > HOC-Overclocking-Wizard.nro.sha256
+      - name: Publish pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.0-beta.56
+          target_commitish: main
+          name: HOC Overclocking Wizard v0.1.0-beta.56
+          prerelease: true
+          make_latest: false
+          body: |
+            Beta 56 polishes the RAM target explanation and graph controls.
+            - RAM target task now reads: "Use the Left / Right buttons" / "to select your target frequency."
+            - Efficiency explanation now states that lower VDD2/VDDQ can reduce overall RAM temperatures and power consumption.
+            - Removes the generic "More details continue in this step..." footer from the two paginated RAM-target explanation pages.
+            - Moves the mini Inspect-points control into the free graph-header area above the plotted curves.
+            - Keeps the real indented explanation layout from beta55.
+            - RAM Score, Efficiency/Performance recommendation logic, graph data, hidden debug, recovery and downstream tuning logic are unchanged.
+          files: |
+            HOC-Overclocking-Wizard.nro
+            HOC-Overclocking-Wizard.nro.sha256
